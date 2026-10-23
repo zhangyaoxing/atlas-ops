@@ -20,7 +20,9 @@
       "args": [
         "index",
         "${input:indexDirectory}",
+        "--project-id",
         "${input:projectId}",
+        "--cluster",
         "${input:clusterRef}"
       ],
       "cwd": "${workspaceFolder}",

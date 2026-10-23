@@ -26,14 +26,15 @@ cp .env.example .env
 # 编辑 .env，填入 ATLAS_PUBLIC_KEY / ATLAS_PRIVATE_KEY
 ```
 
-还可以在 `.env` 里预置 `ATLAS_PROJECT_ID` 和 `ATLAS_CLUSTER_NAME`，命令参数省略时会使用它们。
+还可以在 `.env` 里预置 `ATLAS_PROJECT_ID` 和 `ATLAS_CLUSTER_NAME`，对应选项省略时会使用它们。
 
 如果不想让工具创建临时数据库用户，可以提供已有用户的 `ATLAS_DB_USERNAME` / `ATLAS_DB_PASSWORD`（或命令行参数 `--db-username` / `--db-password`）。两者必须同时提供；只提供一个会报错。密码写在命令行会进入 shell 历史，建议放在 `.env` 中。
 
 工具启动时会从当前工作目录向上查找最近的 `.env` 并加载。已经通过 shell 导出的变量优先于文件内容，因此临时覆盖可以这样写：
 
 ```bash
-ATLAS_PUBLIC_KEY=... ATLAS_PRIVATE_KEY=... uv run sie-atlas-ops index ./examples/indexes 64f1a2b3c4d5e6f7a8b9c0d1 cluster0
+ATLAS_PUBLIC_KEY=... ATLAS_PRIVATE_KEY=... uv run sie-atlas-ops index ./examples/indexes \
+  --project-id 64f1a2b3c4d5e6f7a8b9c0d1 --cluster cluster0
 ```
 
 `.env` 已被 git 忽略，不会误提交凭据。也可以完全不使用 `.env`，直接 `export` 相应变量。
@@ -47,32 +48,30 @@ ATLAS_PUBLIC_KEY=... ATLAS_PRIVATE_KEY=... uv run sie-atlas-ops index ./examples
 
 ```bash
 # 项目 ID + 集群名
-uv run sie-atlas-ops index ./examples/indexes 64f1a2b3c4d5e6f7a8b9c0d1 cluster0
+uv run sie-atlas-ops index ./examples/indexes \
+  --project-id 64f1a2b3c4d5e6f7a8b9c0d1 --cluster cluster0
 
 # 集群 ID 也可以（24 位十六进制）
-uv run sie-atlas-ops index ./examples/indexes 64f1a2b3c4d5e6f7a8b9c0d1 b1c2d3e4f5a6b7c8d9e0f1a2
+uv run sie-atlas-ops index ./examples/indexes \
+  --project-id 64f1a2b3c4d5e6f7a8b9c0d1 --cluster b1c2d3e4f5a6b7c8d9e0f1a2
 
 # 从 .env / 环境变量读取 project 和 cluster
 uv run sie-atlas-ops index ./examples/indexes
 
-# 只给一个位置参数时会自动推断：
-# - 设了 ATLAS_PROJECT_ID、没设 ATLAS_CLUSTER_NAME → 该参数是集群（名称或 ID）
-# - 否则 24 位十六进制 → project；非 24 位十六进制 → 集群名
-uv run sie-atlas-ops index ./examples/indexes cluster0
-
 # 使用已有数据库用户，跳过临时用户的创建、等待和删除
-uv run sie-atlas-ops index ./examples/indexes 64f1a2b3c4d5e6f7a8b9c0d1 cluster0 \
+uv run sie-atlas-ops index ./examples/indexes \
+  --project-id 64f1a2b3c4d5e6f7a8b9c0d1 --cluster cluster0 \
   --db-username appUser --db-password '...'
 ```
 
-参数（按顺序）：
+参数：
 
 - `DIRECTORY`：存放 `*.json` 的目录（不递归子目录）
-- `PROJECT`：project ID（24 位十六进制）；省略时依次取 `ATLAS_PROJECT_ID`、交互输入
-- `CLUSTER`：集群 ID 或名称；省略时依次取 `ATLAS_CLUSTER_NAME`、交互输入
 
 选项：
 
+- `--project-id`：project ID（24 位十六进制）；省略时依次取 `ATLAS_PROJECT_ID`、交互输入
+- `--cluster`：集群 ID 或名称；省略时依次取 `ATLAS_CLUSTER_NAME`、交互输入
 - `--db-username` / `--db-password`：已有数据库用户；也可以使用 `ATLAS_DB_USERNAME` / `ATLAS_DB_PASSWORD`。两者必须同时提供，提供后不会创建或删除临时用户
 - 密码走命令行会进入 shell 历史，建议放在 `.env` 或使用环境变量
 
@@ -105,8 +104,8 @@ JSON 格式：
 
 1. 读取并校验目录下所有 JSON 文件
 2. 加载最近的 `.env`，再读取 Atlas API 凭据（shell 变量优先）
-3. 解析 project：命令行参数 → `ATLAS_PROJECT_ID` → 交互输入（校验 24 位十六进制）
-4. 解析集群：命令行参数 → `ATLAS_CLUSTER_NAME` → 交互输入；在指定 project 内按 ID
+3. 解析 project：`--project-id` → `ATLAS_PROJECT_ID` → 交互输入（校验 24 位十六进制）
+4. 解析集群：`--cluster` → `ATLAS_CLUSTER_NAME` → 交互输入；在指定 project 内按 ID
    或名称查找，多个同名集群时提示选择
 5. 拉取集群详情并列出全部连接串（standard / standardSrv / private / privateSrv /
    awsPrivateLink / privateEndpoint）；多个时提示选择

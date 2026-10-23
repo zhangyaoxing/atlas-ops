@@ -205,8 +205,8 @@ def test_index_help_documents_arguments() -> None:
     result = runner.invoke(app, ["index", "--help"])
     assert result.exit_code == 0
     assert "directory" in result.stdout
-    assert "project" in result.stdout
-    assert "cluster" in result.stdout
+    assert "--project-id" in result.stdout
+    assert "--cluster" in result.stdout
 
 
 def test_index_selects_connection_string(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -218,7 +218,11 @@ def test_index_selects_connection_string(tmp_path: Path, monkeypatch: pytest.Mon
     )
     _patch_client(monkeypatch, client)
 
-    result = runner.invoke(app, ["index", str(tmp_path), GROUP_A.id, "cluster0"], input="2\n")
+    result = runner.invoke(
+        app,
+        ["index", str(tmp_path), "--project-id", GROUP_A.id, "--cluster", "cluster0"],
+        input="2\n",
+    )
 
     assert result.exit_code == 0, result.output
     assert 'Connection: "mongodb+srv://srv"' in result.output
@@ -234,7 +238,9 @@ def test_index_creates_temporary_user(tmp_path: Path, monkeypatch: pytest.Monkey
     client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail(standard="mongodb://only"))
     _patch_client(monkeypatch, client)
 
-    result = runner.invoke(app, ["index", str(tmp_path), GROUP_A.id, "cluster0"])
+    result = runner.invoke(
+        app, ["index", str(tmp_path), "--project-id", GROUP_A.id, "--cluster", "cluster0"]
+    )
 
     assert result.exit_code == 0, result.output
     payload = client.created_user_payload
@@ -269,7 +275,9 @@ def test_index_uses_provided_credentials(
         [
             "index",
             str(tmp_path),
+            "--project-id",
             GROUP_A.id,
+            "--cluster",
             "cluster0",
             "--db-username",
             "appUser",
@@ -297,7 +305,9 @@ def test_index_uses_provided_credentials_from_environment(
     monkeypatch.setenv("ATLAS_DB_USERNAME", "envUser")
     monkeypatch.setenv("ATLAS_DB_PASSWORD", "envPass")
 
-    result = runner.invoke(app, ["index", str(tmp_path), GROUP_A.id, "cluster0"])
+    result = runner.invoke(
+        app, ["index", str(tmp_path), "--project-id", GROUP_A.id, "--cluster", "cluster0"]
+    )
 
     assert result.exit_code == 0, result.output
     assert client.created_user_payload is None
@@ -323,7 +333,7 @@ def test_index_requires_both_provided_credentials(
 
     result = runner.invoke(
         app,
-        ["index", str(tmp_path), GROUP_A.id, "cluster0", *extra_args],
+        ["index", str(tmp_path), "--project-id", GROUP_A.id, "--cluster", "cluster0", *extra_args],
     )
 
     assert result.exit_code == 1
@@ -339,7 +349,9 @@ def test_index_creates_pending_indexes(
     client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail(standard="mongodb://only"))
     _patch_client(monkeypatch, client)
 
-    result = runner.invoke(app, ["index", str(tmp_path), GROUP_A.id, "cluster0"])
+    result = runner.invoke(
+        app, ["index", str(tmp_path), "--project-id", GROUP_A.id, "--cluster", "cluster0"]
+    )
 
     assert result.exit_code == 0, result.output
     assert mongo.client.commands == [
@@ -367,7 +379,9 @@ def test_index_creation_honours_commit_quorum(
     client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail(standard="mongodb://only"))
     _patch_client(monkeypatch, client)
 
-    result = runner.invoke(app, ["index", str(tmp_path), GROUP_A.id, "cluster0"])
+    result = runner.invoke(
+        app, ["index", str(tmp_path), "--project-id", GROUP_A.id, "--cluster", "cluster0"]
+    )
 
     assert result.exit_code == 0, result.output
     assert mongo.client.commands[0]["commitQuorum"] == "majority"
@@ -383,7 +397,11 @@ def test_index_prompts_when_collection_missing(
     missing_client = FakeMongoClient({"exampleDB": []})
     monkeypatch.setattr("sie_atlas_ops.cli.create_client", lambda uri: missing_client)
 
-    result = runner.invoke(app, ["index", str(tmp_path), GROUP_A.id, "cluster0"], input="y\n")
+    result = runner.invoke(
+        app,
+        ["index", str(tmp_path), "--project-id", GROUP_A.id, "--cluster", "cluster0"],
+        input="y\n",
+    )
 
     assert result.exit_code == 0, result.output
     assert 'Collection "exampleDB.example" does not exist.' in result.output
@@ -400,7 +418,11 @@ def test_index_prompts_when_database_missing(
     missing_client = FakeMongoClient({})
     monkeypatch.setattr("sie_atlas_ops.cli.create_client", lambda uri: missing_client)
 
-    result = runner.invoke(app, ["index", str(tmp_path), GROUP_A.id, "cluster0"], input="y\n")
+    result = runner.invoke(
+        app,
+        ["index", str(tmp_path), "--project-id", GROUP_A.id, "--cluster", "cluster0"],
+        input="y\n",
+    )
 
     assert result.exit_code == 0, result.output
     assert 'Database "exampleDB" does not exist' in result.output
@@ -416,7 +438,11 @@ def test_index_aborts_when_missing_namespace_declined(
     missing_client = FakeMongoClient({"exampleDB": []})
     monkeypatch.setattr("sie_atlas_ops.cli.create_client", lambda uri: missing_client)
 
-    result = runner.invoke(app, ["index", str(tmp_path), GROUP_A.id, "cluster0"], input="n\n")
+    result = runner.invoke(
+        app,
+        ["index", str(tmp_path), "--project-id", GROUP_A.id, "--cluster", "cluster0"],
+        input="n\n",
+    )
 
     assert result.exit_code == 1
     assert "Aborted." in result.output
@@ -431,7 +457,9 @@ def test_index_connects_with_temporary_credentials(
     client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail(standard="mongodb://only"))
     _patch_client(monkeypatch, client)
 
-    result = runner.invoke(app, ["index", str(tmp_path), GROUP_A.id, "cluster0"])
+    result = runner.invoke(
+        app, ["index", str(tmp_path), "--project-id", GROUP_A.id, "--cluster", "cluster0"]
+    )
 
     assert result.exit_code == 0, result.output
     payload = client.created_user_payload
@@ -452,7 +480,9 @@ def test_index_reports_mongo_errors(tmp_path: Path, monkeypatch: pytest.MonkeyPa
 
     monkeypatch.setattr("sie_atlas_ops.cli.create_client", factory)
 
-    result = runner.invoke(app, ["index", str(tmp_path), GROUP_A.id, "cluster0"])
+    result = runner.invoke(
+        app, ["index", str(tmp_path), "--project-id", GROUP_A.id, "--cluster", "cluster0"]
+    )
 
     assert result.exit_code == 1
     assert "MongoDB request failed: boom" in result.output
@@ -475,7 +505,9 @@ def test_index_warns_when_temporary_user_deletion_fails(
     )
     _patch_client(monkeypatch, client)
 
-    result = runner.invoke(app, ["index", str(tmp_path), GROUP_A.id, "cluster0"])
+    result = runner.invoke(
+        app, ["index", str(tmp_path), "--project-id", GROUP_A.id, "--cluster", "cluster0"]
+    )
 
     assert result.exit_code == 0, result.output
     assert "Could not delete temporary user" in result.output
@@ -494,7 +526,9 @@ def test_index_skips_identical_existing_index(
     package_logger = logging.getLogger("sie_atlas_ops")
     package_logger.addHandler(handler)
     try:
-        result = runner.invoke(app, ["index", str(tmp_path), GROUP_A.id, "cluster0"])
+        result = runner.invoke(
+            app, ["index", str(tmp_path), "--project-id", GROUP_A.id, "--cluster", "cluster0"]
+        )
     finally:
         package_logger.removeHandler(handler)
 
@@ -527,7 +561,9 @@ def test_index_warns_about_existing_index_with_different_options(
     package_logger = logging.getLogger("sie_atlas_ops")
     package_logger.addHandler(handler)
     try:
-        result = runner.invoke(app, ["index", str(tmp_path), GROUP_A.id, "cluster0"])
+        result = runner.invoke(
+            app, ["index", str(tmp_path), "--project-id", GROUP_A.id, "--cluster", "cluster0"]
+        )
     finally:
         package_logger.removeHandler(handler)
 
@@ -544,7 +580,9 @@ def test_index_accepts_cluster_id(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail(standard="mongodb://only"))
     _patch_client(monkeypatch, client)
 
-    result = runner.invoke(app, ["index", str(tmp_path), GROUP_A.id, CLUSTER.id])
+    result = runner.invoke(
+        app, ["index", str(tmp_path), "--project-id", GROUP_A.id, "--cluster", CLUSTER.id]
+    )
 
     assert result.exit_code == 0, result.output
     assert "mongodb://only" in result.output
@@ -564,65 +602,30 @@ def test_index_uses_environment_fallbacks(tmp_path: Path, monkeypatch: pytest.Mo
     assert "mongodb://only" in result.output
 
 
-def test_index_empty_positionals_fall_back_to_environment(
+def test_index_options_override_environment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _write_definitions(tmp_path)
     client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail(standard="mongodb://only"))
     _patch_client(monkeypatch, client)
-    monkeypatch.setenv("ATLAS_PROJECT_ID", GROUP_A.id)
-    monkeypatch.setenv("ATLAS_CLUSTER_NAME", "cluster0")
+    monkeypatch.setenv("ATLAS_PROJECT_ID", "f" * 24)
+    monkeypatch.setenv("ATLAS_CLUSTER_NAME", "other-cluster")
 
-    result = runner.invoke(app, ["index", str(tmp_path), "", ""])
-
-    assert result.exit_code == 0, result.output
-    assert client.get_group_calls == [GROUP_A.id]
-
-
-def test_index_single_positional_is_treated_as_cluster(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _write_definitions(tmp_path)
-    client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail(standard="mongodb://only"))
-    _patch_client(monkeypatch, client)
-    monkeypatch.setenv("ATLAS_PROJECT_ID", GROUP_A.id)
-    monkeypatch.delenv("ATLAS_CLUSTER_NAME", raising=False)
-
-    result = runner.invoke(app, ["index", str(tmp_path), "cluster0"])
-
-    assert result.exit_code == 0, result.output
-    assert client.get_group_calls == [GROUP_A.id]
-
-
-def test_index_single_cluster_id_with_env_project(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _write_definitions(tmp_path)
-    client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail(standard="mongodb://only"))
-    _patch_client(monkeypatch, client)
-    monkeypatch.setenv("ATLAS_PROJECT_ID", GROUP_A.id)
-    monkeypatch.delenv("ATLAS_CLUSTER_NAME", raising=False)
-
-    result = runner.invoke(app, ["index", str(tmp_path), CLUSTER.id])
+    result = runner.invoke(
+        app,
+        [
+            "index",
+            str(tmp_path),
+            "--project-id",
+            GROUP_A.id,
+            "--cluster",
+            "cluster0",
+        ],
+    )
 
     assert result.exit_code == 0, result.output
     assert client.get_group_calls == [GROUP_A.id]
     assert client.get_cluster_calls == [("cluster0", GROUP_A.id)]
-
-
-def test_index_single_project_id_with_env_cluster(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _write_definitions(tmp_path)
-    client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail(standard="mongodb://only"))
-    _patch_client(monkeypatch, client)
-    monkeypatch.setenv("ATLAS_CLUSTER_NAME", "cluster0")
-    monkeypatch.delenv("ATLAS_PROJECT_ID", raising=False)
-
-    result = runner.invoke(app, ["index", str(tmp_path), GROUP_A.id])
-
-    assert result.exit_code == 0, result.output
-    assert client.get_group_calls == [GROUP_A.id]
 
 
 def test_index_prompts_for_missing_project_and_cluster(
@@ -685,7 +688,9 @@ def test_index_reports_project_not_found(tmp_path: Path, monkeypatch: pytest.Mon
     client = FakeAtlasClient([], {}, _detail(standard="mongodb://only"))
     _patch_client(monkeypatch, client)
 
-    result = runner.invoke(app, ["index", str(tmp_path), GROUP_A.id, "cluster0"])
+    result = runner.invoke(
+        app, ["index", str(tmp_path), "--project-id", GROUP_A.id, "--cluster", "cluster0"]
+    )
 
     assert result.exit_code == 1
     assert "not found or is not accessible" in result.output
@@ -699,7 +704,9 @@ def test_index_auto_selects_single_connection_string(
     client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail(standard="mongodb://only"))
     _patch_client(monkeypatch, client)
 
-    result = runner.invoke(app, ["index", str(tmp_path), GROUP_A.id, "cluster0"], input="")
+    result = runner.invoke(
+        app, ["index", str(tmp_path), "--project-id", GROUP_A.id, "--cluster", "cluster0"], input=""
+    )
 
     assert result.exit_code == 0, result.output
     assert "Available connection strings" not in result.output
@@ -718,7 +725,11 @@ def test_index_asks_when_multiple_clusters_match(
     )
     _patch_client(monkeypatch, client)
 
-    result = runner.invoke(app, ["index", str(tmp_path), GROUP_A.id, "cluster0"], input="2\n")
+    result = runner.invoke(
+        app,
+        ["index", str(tmp_path), "--project-id", GROUP_A.id, "--cluster", "cluster0"],
+        input="2\n",
+    )
 
     assert result.exit_code == 0, result.output
     assert "Multiple clusters match" in result.output
@@ -736,7 +747,11 @@ def test_index_reprompts_on_invalid_selection(
     )
     _patch_client(monkeypatch, client)
 
-    result = runner.invoke(app, ["index", str(tmp_path), GROUP_A.id, "cluster0"], input="9\n2\n")
+    result = runner.invoke(
+        app,
+        ["index", str(tmp_path), "--project-id", GROUP_A.id, "--cluster", "cluster0"],
+        input="9\n2\n",
+    )
 
     assert result.exit_code == 0, result.output
     assert "Enter a number between 1 and 2" in result.output
@@ -796,7 +811,9 @@ def test_index_reports_unknown_cluster(tmp_path: Path, monkeypatch: pytest.Monke
     client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail(standard="mongodb://x"))
     _patch_client(monkeypatch, client)
 
-    result = runner.invoke(app, ["index", str(tmp_path), GROUP_A.id, "missing"])
+    result = runner.invoke(
+        app, ["index", str(tmp_path), "--project-id", GROUP_A.id, "--cluster", "missing"]
+    )
 
     assert result.exit_code == 1
     assert "No cluster found for 'missing'" in result.output
@@ -809,7 +826,9 @@ def test_index_reports_cluster_without_connection_strings(
     client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail())
     _patch_client(monkeypatch, client)
 
-    result = runner.invoke(app, ["index", str(tmp_path), GROUP_A.id, "cluster0"])
+    result = runner.invoke(
+        app, ["index", str(tmp_path), "--project-id", GROUP_A.id, "--cluster", "cluster0"]
+    )
 
     assert result.exit_code == 1
     assert "no connection strings" in result.output
@@ -825,7 +844,9 @@ def test_index_reports_atlas_api_errors(tmp_path: Path, monkeypatch: pytest.Monk
     client = FailingClient([], {}, _detail(standard="mongodb://x"))
     _patch_client(monkeypatch, client)
 
-    result = runner.invoke(app, ["index", str(tmp_path), GROUP_A.id, "cluster0"])
+    result = runner.invoke(
+        app, ["index", str(tmp_path), "--project-id", GROUP_A.id, "--cluster", "cluster0"]
+    )
 
     assert result.exit_code == 1
     assert "HTTP 401" in result.output
@@ -833,7 +854,10 @@ def test_index_reports_atlas_api_errors(tmp_path: Path, monkeypatch: pytest.Monk
 
 
 def test_index_rejects_missing_directory(tmp_path: Path) -> None:
-    result = runner.invoke(app, ["index", str(tmp_path / "missing"), GROUP_A.id, "cluster0"])
+    result = runner.invoke(
+        app,
+        ["index", str(tmp_path / "missing"), "--project-id", GROUP_A.id, "--cluster", "cluster0"],
+    )
 
     assert result.exit_code == 2
     assert "does not exist" in result.output
@@ -864,7 +888,7 @@ def test_index_logs_found_cluster_and_connection_strings(
     try:
         result = runner.invoke(
             app,
-            ["index", str(tmp_path), GROUP_A.id, "cluster0"],
+            ["index", str(tmp_path), "--project-id", GROUP_A.id, "--cluster", "cluster0"],
             input="2\n",
         )
     finally:
@@ -899,7 +923,9 @@ def test_index_logs_lookup_by_id(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     package_logger = logging.getLogger("sie_atlas_ops")
     package_logger.addHandler(handler)
     try:
-        result = runner.invoke(app, ["index", str(tmp_path), GROUP_A.id, CLUSTER.id])
+        result = runner.invoke(
+            app, ["index", str(tmp_path), "--project-id", GROUP_A.id, "--cluster", CLUSTER.id]
+        )
     finally:
         package_logger.removeHandler(handler)
 

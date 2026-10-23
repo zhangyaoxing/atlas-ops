@@ -111,15 +111,17 @@ def index(
         resolve_path=True,
         help="Directory containing one JSON file per collection.",
     ),
-    project: str | None = typer.Argument(
+    project: str | None = typer.Option(
         None,
+        "--project-id",
         help=(
             "Atlas project ID (24 hexadecimal characters). "
             f"Falls back to {PROJECT_ID_ENV}, then prompts."
         ),
     ),
-    cluster: str | None = typer.Argument(
+    cluster: str | None = typer.Option(
         None,
+        "--cluster",
         help=(f"Atlas cluster ID or name. Falls back to {CLUSTER_NAME_ENV}, then prompts."),
     ),
     db_username: str | None = typer.Option(
@@ -144,7 +146,7 @@ def index(
     """Load index definitions, locate the cluster, and pick a connection string.
 
     Every ``*.json`` file in DIRECTORY is parsed and validated. The project is
-    resolved from the argument, the environment, or an interactive prompt; the
+    resolved from the option, the environment, or an interactive prompt; the
     cluster is looked up inside that project, and one of its connection strings
     is selected interactively. Existing database credentials are used when
     supplied; otherwise a cluster-scoped temporary database user is created,
@@ -249,26 +251,16 @@ def index(
 
 
 def _resolve_references(project: str | None, cluster: str | None) -> tuple[str, str]:
-    """Resolve the project and cluster from arguments, environment, or prompts."""
+    """Resolve the project and cluster from options, environment, or prompts."""
     project_ref = (project or "").strip()
     cluster_ref = (cluster or "").strip()
-    env_project = os.environ.get(PROJECT_ID_ENV, "").strip()
-    env_cluster = os.environ.get(CLUSTER_NAME_ENV, "").strip()
-
-    # Click binds a lone positional to PROJECT. Decide whether it actually
-    # refers to the cluster: a non-ID value can only be a cluster name, and
-    # with ATLAS_PROJECT_ID set an ID can only be a cluster ID.
-    if project_ref and not cluster_ref:
-        looks_like_cluster = not is_object_id(project_ref) or (env_project and not env_cluster)
-        if looks_like_cluster:
-            project_ref, cluster_ref = "", project_ref
 
     if not project_ref:
-        project_ref = env_project
+        project_ref = os.environ.get(PROJECT_ID_ENV, "").strip()
         if project_ref:
             logger.info("Using project %s from %s", project_ref, PROJECT_ID_ENV)
     if not cluster_ref:
-        cluster_ref = env_cluster
+        cluster_ref = os.environ.get(CLUSTER_NAME_ENV, "").strip()
         if cluster_ref:
             logger.info(
                 "Using cluster [green]%s[/green] from %s",
