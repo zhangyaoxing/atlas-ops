@@ -214,18 +214,16 @@ collection by collection:
 - `options` keeps `name`, `unique`, and other user options while removing the
   server-managed fields `v`, `key`, and `ns`
 - Exported files can be used directly as the input directory for the default mode
-- The run ends with a per-collection table showing the number of exported indexes and
-  the total:
+- The run ends with a per-collection Markdown table showing the number of exported
+  indexes and the total:
 
-```text
 Export summary (2 collection(s) from /path/to/exported-indexes):
-Collection        Exported
-----------------  --------
-exampleDB.orders         1
-exampleDB.users          2
-----------------  --------
-Total                    3
-```
+
+| Collection | Exported |
+| --- | ---: |
+| exampleDB.orders | 1 |
+| exampleDB.users | 2 |
+| **Total** | **3** |
 
 The default mode ends after creating/deleting indexes; export mode ends after writing
 files and printing the summary. Creating a temporary database user requires an Atlas

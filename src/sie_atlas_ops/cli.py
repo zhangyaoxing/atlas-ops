@@ -629,6 +629,7 @@ def _print_export_summary(
 
     rows = [(f"{item.database}.{item.collection}", item.indexes) for item in result.collections]
     typer.echo(f"Export summary ({result.files} collection(s) from {directory}):")
+    typer.echo("")
     typer.echo(_format_export_table(rows))
     typer.echo("")
     typer.echo(
@@ -637,21 +638,18 @@ def _print_export_summary(
 
 
 def _format_export_table(rows: list[tuple[str, int]]) -> str:
-    headers = ("Collection", "Exported")
-    total = ("Total", sum(count for _, count in rows))
-    widths = [len(value) for value in headers]
-    for row in [*rows, total]:
-        widths[0] = max(widths[0], len(row[0]))
-        widths[1] = max(widths[1], len(str(row[1])))
-
-    def render(cells: tuple[object, object]) -> str:
-        return f"{str(cells[0]).ljust(widths[0])}  {str(cells[1]).rjust(widths[1])}"
-
-    rule = "  ".join("-" * width for width in widths)
-    lines = [render(headers), rule]
-    lines.extend(render(row) for row in rows)
-    lines.extend([rule, render(total)])
+    total = sum(count for _, count in rows)
+    lines = [
+        "| Collection | Exported |",
+        "| --- | ---: |",
+    ]
+    lines.extend(f"| {_markdown_cell(namespace)} | {count} |" for namespace, count in rows)
+    lines.append(f"| **Total** | **{total}** |")
     return "\n".join(lines)
+
+
+def _markdown_cell(value: object) -> str:
+    return str(value).replace("\\", "\\\\").replace("|", "\\|")
 
 
 def _format_utc(value: datetime) -> str:
