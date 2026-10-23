@@ -1273,6 +1273,8 @@ def test_search_exports_search_indexes(tmp_path: Path, monkeypatch: pytest.Monke
             "indexID": "id-1",
             "name": "default",
             "type": "search",
+            "status": "READY",
+            "queryable": True,
             "latestDefinition": {"mappings": {"dynamic": True}},
         }
     ]
@@ -1298,12 +1300,9 @@ def test_search_exports_search_indexes(tmp_path: Path, monkeypatch: pytest.Monke
         "collection": "movies",
         "indexes": [
             {
-                "database": "sample_mflix",
-                "collectionName": "movies",
-                "indexID": "id-1",
                 "name": "default",
                 "type": "search",
-                "latestDefinition": {"mappings": {"dynamic": True}},
+                "definition": {"mappings": {"dynamic": True}},
             }
         ],
     }

@@ -26,6 +26,10 @@ def test_export_groups_search_indexes_by_collection(tmp_path: Path) -> None:
                 "indexID": "id-2",
                 "name": "vector",
                 "type": "vectorSearch",
+                "status": "READY",
+                "queryable": True,
+                "latestDefinitionVersion": {"version": 3},
+                "statusDetail": [{"host": "host-1"}],
                 "latestDefinition": {"fields": [{"type": "vector"}]},
             },
             {
@@ -60,8 +64,21 @@ def test_export_groups_search_indexes_by_collection(tmp_path: Path) -> None:
     movies = json.loads((tmp_path / "sample_mflix.movies.json").read_text(encoding="utf-8"))
     assert movies["database"] == "sample_mflix"
     assert movies["collection"] == "movies"
-    assert [item["name"] for item in movies["indexes"]] == ["default", "vector"]
-    assert movies["indexes"][1]["latestDefinition"] == {"fields": [{"type": "vector"}]}
+    assert movies["indexes"] == [
+        {
+            "name": "default",
+            "type": "search",
+            "definition": {"mappings": {"dynamic": True}},
+        },
+        {
+            "name": "vector",
+            "type": "vectorSearch",
+            "definition": {"fields": [{"type": "vector"}]},
+        },
+    ]
+    assert "indexID" not in json.dumps(movies)
+    assert "status" not in json.dumps(movies)
+    assert "latestDefinitionVersion" not in json.dumps(movies)
     assert client.calls == [
         (
             "GET",
@@ -140,3 +157,27 @@ def test_export_without_search_indexes_writes_nothing(tmp_path: Path) -> None:
 
     assert result == SearchExportResult(files=0, indexes=0, collections=())
     assert list(tmp_path.iterdir()) == []
+
+
+def test_export_falls_back_to_definition_and_default_type(tmp_path: Path) -> None:
+    client = FakeClient(
+        [
+            {
+                "database": "db",
+                "collectionName": "coll",
+                "name": "legacy",
+                "definition": {"mappings": {"dynamic": True}},
+            }
+        ]
+    )
+
+    export_search_indexes(client, "project-1", "cluster0", tmp_path)
+
+    payload = json.loads((tmp_path / "db.coll.json").read_text(encoding="utf-8"))
+    assert payload["indexes"] == [
+        {
+            "name": "legacy",
+            "type": "search",
+            "definition": {"mappings": {"dynamic": True}},
+        }
+    ]

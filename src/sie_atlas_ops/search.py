@@ -41,8 +41,10 @@ def export_search_indexes(
     """Write one JSON file per collection that has Atlas Search indexes.
 
     The cluster-wide Atlas Search endpoint is used so no MongoDB connection or
-    database credentials are required. Raw API objects are preserved so that
-    search and vectorSearch definitions both round-trip.
+    database credentials are required. Only fields needed to recreate or update
+    an index are kept: ``name``, ``type``, and ``definition``. Server-managed
+    fields such as ``indexID``, ``status``, ``queryable``, ``statusDetail``, and
+    ``latestDefinitionVersion`` are omitted.
     """
     directory.mkdir(parents=True, exist_ok=True)
     path = (
@@ -67,14 +69,17 @@ def export_search_indexes(
             or not collection
         ):
             continue
-        grouped.setdefault((database, collection), []).append(item)
+        definition = _exported_definition(item)
+        if definition is None:
+            continue
+        grouped.setdefault((database, collection), []).append(definition)
 
     files = 0
     indexes = 0
     exported: list[SearchCollection] = []
     for database, collection in sorted(grouped):
         definitions = grouped[(database, collection)]
-        definitions.sort(key=lambda item: str(item.get("name") or item.get("indexID") or ""))
+        definitions.sort(key=lambda item: str(item.get("name") or ""))
         if not definitions:
             continue
 
@@ -103,6 +108,28 @@ def export_search_indexes(
         indexes=indexes,
         collections=tuple(exported),
     )
+
+
+def _exported_definition(item: dict[str, Any]) -> dict[str, Any] | None:
+    name = item.get("name")
+    if not isinstance(name, str) or not name:
+        return None
+
+    definition = item.get("latestDefinition")
+    if not isinstance(definition, dict):
+        definition = item.get("definition")
+    if not isinstance(definition, dict):
+        definition = {}
+
+    index_type = item.get("type")
+    if not isinstance(index_type, str) or not index_type:
+        index_type = "search"
+
+    return {
+        "name": name,
+        "type": index_type,
+        "definition": definition,
+    }
 
 
 def _results(payload: Any) -> list[dict[str, Any]]:

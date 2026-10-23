@@ -273,8 +273,12 @@ Options:
 Behavior:
 
 - Calls `GET /groups/{groupId}/clusters/{clusterName}/search/indexes` through the
-  Atlas SDK and preserves the raw Search index objects, including `search` and
-  `vectorSearch` types
+  Atlas SDK
+- Keeps only the fields needed to create or update an index: `name`, `type`, and
+  `definition` (taken from `latestDefinition`)
+- Omits server-managed fields such as `indexID`, `status`, `queryable`,
+  `statusDetail`, and `latestDefinitionVersion`
+- Supports both `search` and `vectorSearch` definitions
 - Writes one file per collection: `<database>.<collection>.json` with this shape:
 
   ```json
@@ -283,17 +287,18 @@ Behavior:
     "collection": "movies",
     "indexes": [
       {
-        "database": "sample_mflix",
-        "collectionName": "movies",
-        "indexID": "...",
         "name": "default",
         "type": "search",
-        "latestDefinition": { "mappings": { "dynamic": true } }
+        "definition": {
+          "mappings": { "dynamic": true }
+        }
       }
     ]
   }
   ```
 
+- `definition` preserves user fields such as `mappings`, `analyzers`, `synonyms`,
+  `storedSource`, and `numPartitions`
 - Unsafe filename characters are replaced with `_`
 - Collections without Search indexes produce no file
 - The run ends with a per-collection Markdown table and total count:
