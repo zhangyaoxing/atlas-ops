@@ -248,6 +248,72 @@ printed in the summary. The six-hour `deleteAfterDate` remains as a fallback in 
 the process is killed. When existing database credentials are supplied, no temporary
 user is created or deleted.
 
+### `search`
+
+Export Atlas Search indexes for one cluster. The command uses the Atlas Admin API
+cluster-wide Search index endpoint, so it does not connect to MongoDB and does not
+create a temporary database user. Only export mode is implemented so far.
+
+```bash
+mkdir -p ./exported-search
+uv run sie-atlas-ops search ./exported-search \
+  --project-id 64f1a2b3c4d5e6f7a8b9c0d1 --cluster cluster0 --export
+```
+
+Arguments:
+
+- `DIRECTORY`: output directory for search index JSON files (must already exist)
+
+Options:
+
+- `-g, --project-id`: project ID; falls back to `ATLAS_PROJECT_ID`, then prompts
+- `-c, --cluster`: cluster ID or name; falls back to `ATLAS_CLUSTER_NAME`, then prompts
+- `-e, --export`: export mode; required for now
+
+Behavior:
+
+- Calls `GET /groups/{groupId}/clusters/{clusterName}/search/indexes` through the
+  Atlas SDK and preserves the raw Search index objects, including `search` and
+  `vectorSearch` types
+- Writes one file per collection: `<database>.<collection>.json` with this shape:
+
+  ```json
+  {
+    "database": "sample_mflix",
+    "collection": "movies",
+    "indexes": [
+      {
+        "database": "sample_mflix",
+        "collectionName": "movies",
+        "indexID": "...",
+        "name": "default",
+        "type": "search",
+        "latestDefinition": { "mappings": { "dynamic": true } }
+      }
+    ]
+  }
+  ```
+
+- Unsafe filename characters are replaced with `_`
+- Collections without Search indexes produce no file
+- The run ends with a per-collection Markdown table and total count:
+
+  ```text
+  Search export summary (2 collection(s) from /path/to/exported-search):
+
+  | Collection          | Exported |
+  | ------------------- | -------: |
+  | sample_mflix.movies |        1 |
+  | sample_mflix.users  |        2 |
+  | **Total**           |    **3** |
+  ```
+
+- The Atlas API key needs a role that can read Search indexes, such as Project Data
+  Access Read Only or Project Search Index Editor
+
+No `--db-username` / `--db-password` options are needed; the command never opens a
+MongoDB connection.
+
 ## Logging
 
 Logs use the standard-library `logging` module with
@@ -334,6 +400,7 @@ source .venv/bin/activate
 │       ├── cli.py                    # Typer app and command definitions
 │       ├── atlas.py                  # credentials, cluster lookup, connection strings
 │       ├── env.py                    # .env loading (search upward, do not override)
+│       ├── filenames.py              # safe JSON export filenames
 │       ├── index/
 │       │   ├── __init__.py
 │       │   ├── create.py             # batched createIndexes
@@ -342,6 +409,7 @@ source .venv/bin/activate
 │       │   ├── export.py             # export index definitions by namespace
 │       │   ├── mongo.py              # MongoDB connection, auth URI, namespace checks
 │       │   └── plan.py               # index/option comparison and extra-index detection
+│       ├── search.py                 # export Atlas Search index definitions
 │       ├── log.py                    # logging config (RichHandler, stderr)
 │       └── errors.py                 # user-facing error types
 └── tests/
@@ -356,7 +424,8 @@ source .venv/bin/activate
     ├── test_cli.py                   # end-to-end CLI tests
     ├── test_atlas.py                 # Atlas helper tests
     ├── test_env.py                   # .env loading tests
-    └── test_log.py                   # color/logging configuration tests
+    ├── test_log.py                   # color/logging configuration tests
+    └── test_search.py                # Atlas Search export tests
 ```
 
 ## Dependencies

@@ -39,6 +39,8 @@ class FakeAtlasClient:
         self.get_cluster_calls: list[tuple[str, str]] = []
         self.created_user_payload: dict[str, Any] | None = None
         self.deleted_user_paths: list[str] = []
+        self.search_index_payload: list[dict[str, Any]] = []
+        self.search_index_requests: list[tuple[str, str, dict[str, Any]]] = []
         self.projects = SimpleNamespace(get_group=self._get_group)
         self.clusters = SimpleNamespace(
             list_group_clusters=self._list_clusters,
@@ -49,6 +51,9 @@ class FakeAtlasClient:
         if method == "DELETE":
             self.deleted_user_paths.append(path)
             return None
+        if path.endswith("/search/indexes"):
+            self.search_index_requests.append((method, path, kwargs))
+            return self.search_index_payload
         self.created_user_payload = kwargs["json"]
         return CloudDatabaseUser.model_validate(kwargs["json"])
 
@@ -1244,3 +1249,128 @@ def test_export_table_escapes_pipes() -> None:
     table = _format_export_table([("db.a|b", 1)])
 
     assert "| db.a\\|b" in table
+
+
+def test_search_help_documents_arguments() -> None:
+    result = runner.invoke(app, ["search", "--help"])
+
+    assert result.exit_code == 0
+    assert "directory" in result.stdout
+    assert "--project-id" in result.stdout
+    assert "-g" in result.stdout
+    assert "--cluster" in result.stdout
+    assert "-c" in result.stdout
+    assert "--export" in result.stdout
+    assert "-e" in result.stdout
+
+
+def test_search_exports_search_indexes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail())
+    client.search_index_payload = [
+        {
+            "database": "sample_mflix",
+            "collectionName": "movies",
+            "indexID": "id-1",
+            "name": "default",
+            "type": "search",
+            "latestDefinition": {"mappings": {"dynamic": True}},
+        }
+    ]
+    _patch_client(monkeypatch, client)
+
+    result = runner.invoke(
+        app,
+        [
+            "search",
+            str(tmp_path),
+            "-g",
+            GROUP_A.id,
+            "-c",
+            "cluster0",
+            "-e",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads((tmp_path / "sample_mflix.movies.json").read_text(encoding="utf-8"))
+    assert payload == {
+        "database": "sample_mflix",
+        "collection": "movies",
+        "indexes": [
+            {
+                "database": "sample_mflix",
+                "collectionName": "movies",
+                "indexID": "id-1",
+                "name": "default",
+                "type": "search",
+                "latestDefinition": {"mappings": {"dynamic": True}},
+            }
+        ],
+    }
+    assert client.search_index_requests[0][0:2] == (
+        "GET",
+        f"/groups/{GROUP_A.id}/clusters/cluster0/search/indexes",
+    )
+    assert client.search_index_requests[0][2]["accept"] == "application/vnd.atlas.2024-05-30+json"
+    assert client.created_user_payload is None
+    assert client.deleted_user_paths == []
+    assert "Search export summary (1 collection(s)" in result.output
+    assert re.search(
+        r"^\| sample_mflix\.movies\s+\|\s+1 \|$",
+        result.output,
+        re.MULTILINE,
+    )
+    assert re.search(
+        r"^\| \*\*Total\*\*\s+\|\s+\*\*1\*\* \|$",
+        result.output,
+        re.MULTILINE,
+    )
+    assert "Exported 1 search index(es) from 1 collection(s)" in result.output
+
+
+def test_search_requires_export(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "search",
+            str(tmp_path),
+            "-g",
+            GROUP_A.id,
+            "-c",
+            "cluster0",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "only --export/-e" in result.output
+
+
+def test_search_reports_missing_credentials(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("ATLAS_PUBLIC_KEY", raising=False)
+    monkeypatch.delenv("ATLAS_PRIVATE_KEY", raising=False)
+    _clear_target_env(monkeypatch)
+
+    result = runner.invoke(app, ["search", str(tmp_path), "--export"])
+
+    assert result.exit_code == 1
+    assert "ATLAS_PUBLIC_KEY" in result.output
+    assert "ATLAS_PRIVATE_KEY" in result.output
+    assert "Project ID (24 hexadecimal characters)" not in result.output
+
+
+def test_search_uses_environment_targets(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail())
+    _patch_client(monkeypatch, client)
+    monkeypatch.setenv("ATLAS_PROJECT_ID", GROUP_A.id)
+    monkeypatch.setenv("ATLAS_CLUSTER_NAME", "cluster0")
+
+    result = runner.invoke(app, ["search", str(tmp_path), "--export"])
+
+    assert result.exit_code == 0, result.output
+    assert client.get_group_calls == [GROUP_A.id]
+    assert client.search_index_requests[0][1] == (
+        f"/groups/{GROUP_A.id}/clusters/cluster0/search/indexes"
+    )
+    assert "Exported 0 search index(es) from 0 collection(s)" in result.output

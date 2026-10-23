@@ -3,16 +3,15 @@
 from __future__ import annotations
 
 import json
-import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from sie_atlas_ops.filenames import json_filename
 from sie_atlas_ops.index.mongo import MongoReadClient
 
 _SYSTEM_DATABASES = {"admin", "local", "config"}
 _SERVER_FIELDS = {"v", "key", "ns"}
-_UNSAFE_FILENAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,7 +67,7 @@ def export_indexes(client: MongoReadClient, directory: Path) -> ExportResult:
                 "collection": collection,
                 "indexes": definitions,
             }
-            path = directory / _filename(database, collection)
+            path = directory / json_filename(database, collection)
             path.write_text(
                 json.dumps(payload, indent=2, ensure_ascii=False, default=str) + "\n",
                 encoding="utf-8",
@@ -103,8 +102,3 @@ def _definitions(indexes: Any) -> list[dict[str, Any]]:
         definitions.append({"keys": dict(key), "options": options})
     definitions.sort(key=lambda item: item["options"].get("name", ""))
     return definitions
-
-
-def _filename(database: str, collection: str) -> str:
-    namespace = f"{database}.{collection}"
-    return f"{_UNSAFE_FILENAME.sub('_', namespace)}.json"

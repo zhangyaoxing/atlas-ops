@@ -67,6 +67,7 @@ from sie_atlas_ops.index.plan import (
     plan_indexes,
 )
 from sie_atlas_ops.log import configure_logging
+from sie_atlas_ops.search import SearchExportResult, export_search_indexes
 
 logger = logging.getLogger(__name__)
 
@@ -310,6 +311,84 @@ def index(
         assert definitions is not None
         assert plan is not None
         _print_summary(directory, definitions, plan, dropped, target, selected)
+
+
+@app.command()
+def search(
+    directory: Path = typer.Argument(
+        ...,
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        readable=True,
+        resolve_path=True,
+        help="Directory for exported search index JSON files.",
+    ),
+    project: str | None = typer.Option(
+        None,
+        "--project-id",
+        "-g",
+        help=(
+            "Atlas project ID (24 hexadecimal characters). "
+            f"Falls back to {PROJECT_ID_ENV}, then prompts."
+        ),
+    ),
+    cluster: str | None = typer.Option(
+        None,
+        "--cluster",
+        "-c",
+        help=(f"Atlas cluster ID or name. Falls back to {CLUSTER_NAME_ENV}, then prompts."),
+    ),
+    export: bool = typer.Option(
+        False,
+        "--export",
+        "-e",
+        help="Export all Atlas Search indexes for the cluster to DIRECTORY.",
+    ),
+) -> None:
+    """Export all Atlas Search index definitions for one cluster.
+
+    The cluster-wide Search index endpoint is used, so the command needs only
+    Atlas API credentials and the project/cluster. No MongoDB connection or
+    temporary database user is created.
+    """
+    target: ClusterTarget | None = None
+    result: SearchExportResult | None = None
+    try:
+        if not export:
+            raise AtlasOperationError("The search command currently supports only --export/-e.")
+        with client_from_env() as client:
+            project_id, cluster_ref = _resolve_references(project, cluster)
+            target_project = get_project(client, project_id)
+            matches = find_clusters(client, target_project, cluster_ref)
+            if not matches:
+                raise AtlasOperationError(f"No cluster found for {cluster_ref!r}.")
+            target = matches[0] if len(matches) == 1 else _choose_cluster(matches)
+            _log_found_cluster(target, cluster_ref)
+            logger.info("Exporting search index definitions to %s...", directory)
+            result = export_search_indexes(
+                client,
+                project_id,
+                target.cluster_name,
+                directory,
+            )
+            logger.info(
+                "Exported %d search index(es) from %d collection(s).",
+                result.indexes,
+                result.files,
+            )
+    except OpsError as exc:
+        _fail(str(exc))
+    except AtlasApiError as exc:
+        _fail(describe_atlas_error(exc))
+    except OSError as exc:
+        _fail(f"Could not write exported search indexes: {exc}")
+    except httpx.HTTPError as exc:
+        _fail(f"Could not reach the Atlas API: {exc}")
+
+    assert target is not None
+    assert result is not None
+    _print_search_export_summary(directory, target, result)
 
 
 def _resolve_references(project: str | None, cluster: str | None) -> tuple[str, str]:
@@ -674,6 +753,27 @@ def _format_export_table(rows: list[tuple[str, int]]) -> str:
 
 def _markdown_cell(value: object) -> str:
     return str(value).replace("\\", "\\\\").replace("|", "\\|")
+
+
+def _print_search_export_summary(
+    directory: Path,
+    target: ClusterTarget,
+    result: SearchExportResult,
+) -> None:
+    typer.echo("")
+    typer.echo(f"Cluster:    {target.cluster_name} ({target.cluster_id or 'unknown ID'})")
+    typer.echo(f"Project:    {target.project_name} ({target.project_id})")
+    typer.echo("")
+
+    rows = [(f"{item.database}.{item.collection}", item.indexes) for item in result.collections]
+    typer.echo(f"Search export summary ({result.files} collection(s) from {directory}):")
+    typer.echo("")
+    typer.echo(_format_export_table(rows))
+    typer.echo("")
+    typer.echo(
+        f"Exported {result.indexes} search index(es) from {result.files} "
+        f"collection(s) to {directory}."
+    )
 
 
 def _format_utc(value: datetime) -> str:
