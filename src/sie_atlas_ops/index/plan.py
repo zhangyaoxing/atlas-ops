@@ -8,7 +8,7 @@ from enum import Enum
 from typing import Any
 
 from sie_atlas_ops.index.definitions import CollectionIndexes, IndexSpec
-from sie_atlas_ops.index.mongo import MissingNamespace, MongoClientLike
+from sie_atlas_ops.index.mongo import MissingNamespace, MongoCommandClient
 
 
 class IndexAction(str, Enum):
@@ -50,7 +50,7 @@ class IndexPlan:
 
 
 def plan_indexes(
-    client: MongoClientLike,
+    client: MongoCommandClient,
     definitions: list[CollectionIndexes],
     missing: list[MissingNamespace],
 ) -> IndexPlan:

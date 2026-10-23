@@ -30,8 +30,8 @@ class FakeMongoClient:
     def list_database_names(self) -> list[str]:
         return list(self._databases)
 
-    def __getitem__(self, database: str) -> FakeMongoDatabase:
-        return FakeMongoDatabase(self._databases.get(database, []))
+    def __getitem__(self, name: str) -> FakeMongoDatabase:
+        return FakeMongoDatabase(self._databases.get(name, []))
 
 
 def _definition(database: str, collection: str) -> CollectionIndexes:

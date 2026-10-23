@@ -28,12 +28,12 @@ class FakeClient:
     def __init__(self, databases: dict[str, dict[str, list[dict[str, Any]]]]) -> None:
         self._databases = databases
 
-    def __getitem__(self, database: str) -> FakeDatabase:
-        return FakeDatabase(self._databases.get(database, {}))
+    def __getitem__(self, name: str) -> FakeDatabase:
+        return FakeDatabase(self._databases.get(name, {}))
 
 
 class ExplodingClient:
-    def __getitem__(self, database: str) -> Any:
+    def __getitem__(self, name: str) -> Any:
         raise AssertionError("indexes must not be listed for missing namespaces")
 
 

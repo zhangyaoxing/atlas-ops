@@ -317,6 +317,7 @@ source .venv/bin/activate
 ├── pyproject.toml                    # project metadata, dependencies, tool config
 ├── uv.lock                           # locked dependency versions
 ├── .python-version                   # pins Python 3.10
+├── pyrightconfig.json                # Pyright/Pylance configuration
 ├── .env.example                      # environment variable template (copy to .env)
 ├── .vscode/                          # VS Code debug, test, and format config
 ├── LICENSE                           # project license

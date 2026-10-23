@@ -20,12 +20,12 @@ class FakeClient:
     def __init__(self) -> None:
         self.databases: dict[str, FakeDatabase] = {}
 
-    def __getitem__(self, database: str) -> FakeDatabase:
-        return self.databases.setdefault(database, FakeDatabase())
+    def __getitem__(self, name: str) -> FakeDatabase:
+        return self.databases.setdefault(name, FakeDatabase())
 
 
 def _item(
-    keys: dict[str, int | str],
+    keys: dict[str, int | float | str],
     options: dict[str, Any] | None = None,
     *,
     database: str = "exampleDB",

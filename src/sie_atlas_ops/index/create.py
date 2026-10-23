@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
 from sie_atlas_ops.index.definitions import IndexSpec
-from sie_atlas_ops.index.mongo import MongoClientLike
+from sie_atlas_ops.index.mongo import MongoCommandClient
 from sie_atlas_ops.index.plan import IndexAction, IndexPlanItem
 
 
@@ -21,7 +21,7 @@ class CreateResult:
     commit_quorum: int | str | None
 
 
-def create_indexes(client: MongoClientLike, plan: list[IndexPlanItem]) -> list[CreateResult]:
+def create_indexes(client: MongoCommandClient, plan: Sequence[IndexPlanItem]) -> list[CreateResult]:
     """Create every index whose plan action is ``CREATE``.
 
     Indexes that share a database, collection, and ``commitQuorum`` are sent

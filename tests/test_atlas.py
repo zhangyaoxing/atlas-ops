@@ -38,7 +38,7 @@ def _page(results: list[Any], total: int | None = None) -> SimpleNamespace:
 
 def _fake_client(
     clusters_by_group: dict[str, list[Any]], groups: tuple[Any, ...] = (GROUP_A,)
-) -> SimpleNamespace:
+) -> Any:
     groups_by_id = {group.id: group for group in groups}
 
     def get_group(group_id: str, **_: Any) -> Any:
@@ -112,7 +112,7 @@ def test_get_project_propagates_other_errors() -> None:
     def get_group(**_: Any) -> Any:
         raise AtlasApiError(403, "Forbidden", None)
 
-    client = SimpleNamespace(projects=SimpleNamespace(get_group=get_group))
+    client: Any = SimpleNamespace(projects=SimpleNamespace(get_group=get_group))
 
     with pytest.raises(AtlasApiError):
         get_project(client, GROUP_A.id)
@@ -205,7 +205,8 @@ def _options_from(**overrides: Any) -> list[ConnectionOption]:
         "model_extra": {},
     }
     values.update(overrides)
-    return connection_options(SimpleNamespace(connection_strings=SimpleNamespace(**values)))
+    cluster: Any = SimpleNamespace(connection_strings=SimpleNamespace(**values))
+    return connection_options(cluster)
 
 
 def test_connection_options_cover_every_flavour() -> None:

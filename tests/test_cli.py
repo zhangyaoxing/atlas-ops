@@ -129,11 +129,11 @@ class FakeMongoClient:
     def list_database_names(self) -> list[str]:
         return list(self._databases)
 
-    def __getitem__(self, database: str) -> FakeMongoDatabase:
+    def __getitem__(self, name: str) -> FakeMongoDatabase:
         return FakeMongoDatabase(
-            self._databases.get(database, []),
+            self._databases.get(name, []),
             self._indexes,
-            database,
+            name,
             self.commands,
         )
 
@@ -1178,6 +1178,7 @@ def test_index_logs_found_cluster_and_connection_strings(
     assert any("Temporary user is active." in message for message in handler.messages)
     assert any("Deleting temporary user [cyan]" in message for message in handler.messages)
     assert any("Temporary user deleted." in message for message in handler.messages)
+    assert client.created_user_payload is not None
     password = client.created_user_payload["password"]
     assert all(password not in message for message in handler.messages)
 

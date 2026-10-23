@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from sie_atlas_ops.index.mongo import MongoClientLike
+from sie_atlas_ops.index.mongo import MongoCommandClient
 from sie_atlas_ops.index.plan import ExtraIndex
 
 
@@ -17,7 +17,7 @@ class DroppedIndex:
     name: str
 
 
-def drop_indexes(client: MongoClientLike, extras: list[ExtraIndex]) -> list[DroppedIndex]:
+def drop_indexes(client: MongoCommandClient, extras: list[ExtraIndex]) -> list[DroppedIndex]:
     """Drop every extra index by name."""
     dropped: list[DroppedIndex] = []
     for extra in extras:

@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from sie_atlas_ops.index.mongo import MongoClientLike
+from sie_atlas_ops.index.mongo import MongoReadClient
 
 _SYSTEM_DATABASES = {"admin", "local", "config"}
 _SERVER_FIELDS = {"v", "key", "ns"}
@@ -33,7 +33,7 @@ class ExportResult:
     collections: tuple[ExportedCollection, ...]
 
 
-def export_indexes(client: MongoClientLike, directory: Path) -> ExportResult:
+def export_indexes(client: MongoReadClient, directory: Path) -> ExportResult:
     """Write one definition file per collection that has user indexes.
 
     System databases (``admin``, ``local``, ``config``), ``system.*``

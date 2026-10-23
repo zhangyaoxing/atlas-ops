@@ -44,8 +44,8 @@ class FakeClient:
     def list_database_names(self) -> list[str]:
         return list(self._databases)
 
-    def __getitem__(self, database: str) -> FakeDatabase:
-        return FakeDatabase(self._databases[database])
+    def __getitem__(self, name: str) -> FakeDatabase:
+        return FakeDatabase(self._databases[name])
 
 
 def test_export_writes_one_file_per_collection(tmp_path: Path) -> None:

@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from collections.abc import Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import NoReturn
@@ -183,6 +184,10 @@ def index(
     try:
         provided_credentials = _resolve_db_credentials(db_username, db_password)
         definitions: list[CollectionIndexes] | None = None
+        created: list[CreateResult] = []
+        dropped: list[DroppedIndex] = []
+        plan: IndexPlan | None = None
+        export_result: ExportResult | None = None
         if not export:
             definitions = load_index_definitions(directory)
         with client_from_env() as client:
@@ -275,7 +280,7 @@ def index(
                         if pending:
                             logger.info("Creating %d index(es)...", pending)
                         created = create_indexes(mongo_client, plan.items)
-                        dropped: list[DroppedIndex] = []
+                        dropped = []
                         if delete_extras:
                             dropped = drop_indexes(mongo_client, list(plan.extras))
                 finally:
@@ -299,8 +304,11 @@ def index(
         _fail(f"Could not reach the Atlas API: {exc}")
 
     if export:
+        assert export_result is not None
         _print_export_summary(directory, target, selected, export_result)
     else:
+        assert definitions is not None
+        assert plan is not None
         _print_summary(directory, definitions, plan, dropped, target, selected)
 
 
@@ -371,7 +379,7 @@ def _report_missing(missing: list[MissingNamespace]) -> None:
             )
 
 
-def _log_index_plan(plan: list[IndexPlanItem]) -> None:
+def _log_index_plan(plan: Sequence[IndexPlanItem]) -> None:
     for item in plan:
         keys = escape(json.dumps(item.spec.keys))
         if item.action is IndexAction.IDENTICAL:
@@ -582,10 +590,18 @@ def _collection_summary(
     for item in dropped:
         bucket((item.database, item.collection))[2] += 1
 
-    return [
-        (f"{database}.{collection}", *counts[(database, collection)])
-        for database, collection in order
-    ]
+    summary: list[tuple[str, int, int, int]] = []
+    for database, collection in order:
+        created_count, skipped_count, deleted_count = counts[(database, collection)]
+        summary.append(
+            (
+                f"{database}.{collection}",
+                created_count,
+                skipped_count,
+                deleted_count,
+            )
+        )
+    return summary
 
 
 def _format_index_table(rows: list[tuple[str, int, int, int]]) -> str:

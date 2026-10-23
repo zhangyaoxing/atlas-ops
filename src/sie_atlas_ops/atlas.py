@@ -9,7 +9,7 @@ import string
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import Any, Protocol
 from urllib.parse import quote
 
 from pyatlassdk import AtlasApiError, AtlasClient
@@ -19,9 +19,6 @@ from pyatlassdk.models.user_scope import UserScope
 from pydantic import BaseModel
 
 from sie_atlas_ops.errors import AtlasOperationError, ConfigurationError
-
-if TYPE_CHECKING:
-    from pyatlassdk.models.cluster_description20240805 import ClusterDescription20240805
 
 PUBLIC_KEY_ENV = "ATLAS_PUBLIC_KEY"
 PRIVATE_KEY_ENV = "ATLAS_PRIVATE_KEY"
@@ -50,23 +47,42 @@ _OBJECT_ID_PATTERN = re.compile(r"^[0-9a-fA-F]{24}$")
 _PAGE_SIZE = 100
 
 
-class _ProjectsAPI(Protocol):
-    def get_group(self, group_id: str, **kwargs: Any) -> Any: ...
+class AtlasProjectClient(Protocol):
+    """Client that can resolve projects."""
+
+    projects: Any
 
 
-class _ClustersAPI(Protocol):
-    def list_group_clusters(self, group_id: str, **kwargs: Any) -> Any: ...
+class AtlasClusterClient(Protocol):
+    """Client that can list and fetch clusters."""
 
-    def get_group_cluster(self, cluster_name: str, group_id: str, **kwargs: Any) -> Any: ...
+    clusters: Any
 
 
-class AtlasClientLike(Protocol):
+class AtlasRequestClient(Protocol):
+    """Client that can send raw Atlas API requests."""
+
+    def request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: Mapping[str, Any] | None = None,
+        json: Any | None = None,
+        response_model: Any | None = None,
+        accept: str | None = None,
+        content_type: str | None = None,
+    ) -> Any: ...
+
+
+class AtlasClientLike(AtlasProjectClient, AtlasClusterClient, AtlasRequestClient, Protocol):
     """Subset of :class:`AtlasClient` used by this module (handy for tests)."""
 
-    projects: _ProjectsAPI
-    clusters: _ClustersAPI
 
-    def request(self, method: str, path: str, **kwargs: Any) -> Any: ...
+class ConnectionStringsCluster(Protocol):
+    """Cluster-like object exposing Atlas connection strings."""
+
+    connection_strings: Any
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,7 +141,7 @@ def client_from_env(environ: Mapping[str, str] | None = None) -> AtlasClient:
     )
 
 
-def get_project(client: AtlasClientLike, project_id: str) -> ProjectTarget:
+def get_project(client: AtlasProjectClient, project_id: str) -> ProjectTarget:
     """Resolve *project_id* to its human-readable name."""
     try:
         group = client.projects.get_group(group_id=project_id)
@@ -139,7 +155,7 @@ def get_project(client: AtlasClientLike, project_id: str) -> ProjectTarget:
 
 
 def find_clusters(
-    client: AtlasClientLike, project: ProjectTarget, reference: str
+    client: AtlasClusterClient, project: ProjectTarget, reference: str
 ) -> list[ClusterTarget]:
     """Find clusters in *project* by 24-hex ID or by name.
 
@@ -175,7 +191,7 @@ def find_clusters(
     return exact or case_insensitive
 
 
-def connection_options(cluster: ClusterDescription20240805) -> list[ConnectionOption]:
+def connection_options(cluster: ConnectionStringsCluster) -> list[ConnectionOption]:
     """Collect every connection string on *cluster*, de-duplicated by URI.
 
     Atlas returns some entries as strings but others as lists or dictionaries.
@@ -215,7 +231,7 @@ def _collect_options(value: Any, label: str, options: list[ConnectionOption]) ->
 
 
 def create_temporary_user(
-    client: AtlasClientLike,
+    client: AtlasRequestClient,
     project: ProjectTarget,
     cluster_name: str,
     *,
@@ -235,18 +251,18 @@ def create_temporary_user(
     delete_after = datetime.now(timezone.utc) + timedelta(hours=ttl_hours)
 
     body = CloudDatabaseUser(
-        group_id=project.project_id,
+        groupId=project.project_id,
         username=username,
         password=password,
-        database_name="admin",
+        databaseName="admin",
         roles=[
             DatabaseUserRole(
-                role_name="readWriteAnyDatabase",
-                database_name="admin",
+                roleName="readWriteAnyDatabase",
+                databaseName="admin",
             )
         ],
         scopes=[UserScope(name=cluster_name, type="CLUSTER")],
-        delete_after_date=delete_after,
+        deleteAfterDate=delete_after,
     )
     created = client.request(
         method="POST",
@@ -263,7 +279,7 @@ def create_temporary_user(
     )
 
 
-def delete_temporary_user(client: AtlasClientLike, project_id: str, username: str) -> None:
+def delete_temporary_user(client: AtlasRequestClient, project_id: str, username: str) -> None:
     """Delete a temporary database user; an already-missing user is not an error."""
     try:
         client.request(
@@ -306,7 +322,7 @@ def describe_atlas_error(exc: AtlasApiError) -> str:
     return f"{message}: {detail}" if detail else message
 
 
-def _iter_clusters(client: AtlasClientLike, group_id: str) -> Iterator[Any]:
+def _iter_clusters(client: AtlasClusterClient, group_id: str) -> Iterator[Any]:
     page_number = 1
     seen = 0
     while True:

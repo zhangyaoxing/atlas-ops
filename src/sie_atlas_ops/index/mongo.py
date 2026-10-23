@@ -22,12 +22,26 @@ _RETRYABLE_AUTH_CODES = frozenset({13, 18})
 logger = logging.getLogger(__name__)
 
 
-class MongoClientLike(Protocol):
-    """Subset of :class:`pymongo.MongoClient` used by this module."""
+class MongoDatabaseNamesClient(Protocol):
+    """Client that can list database names."""
 
     def list_database_names(self) -> list[str]: ...
 
-    def __getitem__(self, database: str) -> Any: ...
+
+class MongoCommandClient(Protocol):
+    """Client that can address databases and issue commands."""
+
+    def __getitem__(self, name: str) -> Any: ...
+
+
+class MongoReadClient(MongoDatabaseNamesClient, MongoCommandClient, Protocol):
+    """Client that can list databases and address collections."""
+
+
+class MongoClientLike(MongoReadClient, Protocol):
+    """Subset of :class:`pymongo.MongoClient` used by this module."""
+
+    def close(self) -> None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,7 +84,7 @@ def create_client(uri: str, *, timeout_ms: int = _DEFAULT_TIMEOUT_MS) -> MongoCl
 
 
 def wait_for_user(
-    client: MongoClientLike,
+    client: MongoDatabaseNamesClient,
     *,
     timeout_seconds: float = _USER_READY_TIMEOUT_SECONDS,
     interval_seconds: float = _USER_READY_INTERVAL_SECONDS,
@@ -99,7 +113,7 @@ def wait_for_user(
 
 
 def find_missing_namespaces(
-    client: MongoClientLike, definitions: list[CollectionIndexes]
+    client: MongoReadClient, definitions: list[CollectionIndexes]
 ) -> list[MissingNamespace]:
     """Return the database/collection pairs from *definitions* that do not exist."""
     existing_databases = set(client.list_database_names())
