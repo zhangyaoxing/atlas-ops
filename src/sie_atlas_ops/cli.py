@@ -28,6 +28,8 @@ from rich.markup import escape
 from sie_atlas_ops import __version__
 from sie_atlas_ops.atlas import (
     CLUSTER_NAME_ENV,
+    DB_PASSWORD_ENV,
+    DB_USERNAME_ENV,
     PROJECT_ID_ENV,
     AtlasClientLike,
     ClusterTarget,
@@ -43,7 +45,7 @@ from sie_atlas_ops.atlas import (
     is_object_id,
 )
 from sie_atlas_ops.env import load_env
-from sie_atlas_ops.errors import AtlasOperationError, OpsError
+from sie_atlas_ops.errors import AtlasOperationError, ConfigurationError, OpsError
 from sie_atlas_ops.index.create import CreateResult, create_indexes
 from sie_atlas_ops.index.definitions import CollectionIndexes, load_index_definitions
 from sie_atlas_ops.index.mongo import (
@@ -120,20 +122,39 @@ def index(
         None,
         help=(f"Atlas cluster ID or name. Falls back to {CLUSTER_NAME_ENV}, then prompts."),
     ),
+    db_username: str | None = typer.Option(
+        None,
+        "--db-username",
+        help=(
+            "Existing database username. Falls back to "
+            f"{DB_USERNAME_ENV}; requires a password and skips the "
+            "temporary user."
+        ),
+    ),
+    db_password: str | None = typer.Option(
+        None,
+        "--db-password",
+        help=(
+            "Existing database password. Falls back to "
+            f"{DB_PASSWORD_ENV}; requires a username and skips the "
+            "temporary user."
+        ),
+    ),
 ) -> None:
     """Load index definitions, locate the cluster, and pick a connection string.
 
     Every ``*.json`` file in DIRECTORY is parsed and validated. The project is
     resolved from the argument, the environment, or an interactive prompt; the
     cluster is looked up inside that project, and one of its connection strings
-    is selected interactively. A cluster-scoped temporary database user is then
-    created and expires after six hours; the command waits for that user to
-    become active. Missing databases and collections are reported and confirmed,
-    existing indexes are compared by key pattern and options, and the remaining
-    indexes are created. The temporary user is deleted on every exit path.
+    is selected interactively. Existing database credentials are used when
+    supplied; otherwise a cluster-scoped temporary database user is created,
+    expires after six hours, and is deleted on every exit path. Missing
+    databases and collections are reported and confirmed, existing indexes are
+    compared by key pattern and options, and the remaining indexes are created.
     """
     try:
         definitions = load_index_definitions(directory)
+        provided_credentials = _resolve_db_credentials(db_username, db_password)
         with client_from_env() as client:
             project_id, cluster_ref = _resolve_references(project, cluster)
             target_project = get_project(client, project_id)
@@ -160,21 +181,33 @@ def index(
 
             temporary_user: TemporaryUser | None = None
             try:
-                temporary_user = create_temporary_user(client, target_project, target.cluster_name)
-                logger.info(
-                    "Created temporary user [cyan]%s[/cyan] (expires %s UTC)",
-                    escape(temporary_user.username),
-                    _format_utc(temporary_user.delete_after),
-                )
-
-                mongo_client = _open_mongo_client(selected, temporary_user)
-                try:
-                    logger.info(
-                        "Waiting for temporary user [cyan]%s[/cyan] to become active...",
-                        escape(temporary_user.username),
+                if provided_credentials is None:
+                    temporary_user = create_temporary_user(
+                        client, target_project, target.cluster_name
                     )
-                    wait_for_user(mongo_client)
-                    logger.info("Temporary user is active.")
+                    logger.info(
+                        "Created temporary user [cyan]%s[/cyan] (expires %s UTC)",
+                        escape(temporary_user.username),
+                        _format_utc(temporary_user.delete_after),
+                    )
+                    db_user = temporary_user.username
+                    db_pass = temporary_user.password
+                else:
+                    db_user, db_pass = provided_credentials
+                    logger.info(
+                        "Using provided database user [cyan]%s[/cyan].",
+                        escape(db_user),
+                    )
+
+                mongo_client = _open_mongo_client(selected, db_user, db_pass)
+                try:
+                    if temporary_user is not None:
+                        logger.info(
+                            "Waiting for temporary user [cyan]%s[/cyan] to become active...",
+                            escape(temporary_user.username),
+                        )
+                        wait_for_user(mongo_client)
+                        logger.info("Temporary user is active.")
                     missing = find_missing_namespaces(mongo_client, definitions)
                     if missing:
                         _report_missing(missing)
@@ -255,16 +288,27 @@ def _resolve_references(project: str | None, cluster: str | None) -> tuple[str, 
     return project_ref, cluster_ref
 
 
-def _open_mongo_client(
-    selected: ConnectionOption, temporary_user: TemporaryUser
-) -> MongoClientLike:
+def _open_mongo_client(selected: ConnectionOption, username: str, password: str) -> MongoClientLike:
     try:
-        uri = build_authenticated_uri(
-            selected.uri, temporary_user.username, temporary_user.password
-        )
+        uri = build_authenticated_uri(selected.uri, username, password)
     except ValueError as exc:
         raise AtlasOperationError(str(exc)) from exc
     return create_client(uri)
+
+
+def _resolve_db_credentials(username: str | None, password: str | None) -> tuple[str, str] | None:
+    """Resolve user-provided database credentials, if any.
+
+    Command-line values take precedence over ``ATLAS_DB_USERNAME`` and
+    ``ATLAS_DB_PASSWORD``. Both values must be present or both omitted.
+    """
+    resolved_username = (username or "").strip() or os.environ.get(DB_USERNAME_ENV, "").strip()
+    resolved_password = (password or "") or os.environ.get(DB_PASSWORD_ENV, "")
+    if bool(resolved_username) != bool(resolved_password):
+        raise ConfigurationError("Provide both a database username and password, or neither.")
+    if not resolved_username:
+        return None
+    return resolved_username, resolved_password
 
 
 def _report_missing(missing: list[MissingNamespace]) -> None:

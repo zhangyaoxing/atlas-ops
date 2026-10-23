@@ -28,6 +28,8 @@ cp .env.example .env
 
 还可以在 `.env` 里预置 `ATLAS_PROJECT_ID` 和 `ATLAS_CLUSTER_NAME`，命令参数省略时会使用它们。
 
+如果不想让工具创建临时数据库用户，可以提供已有用户的 `ATLAS_DB_USERNAME` / `ATLAS_DB_PASSWORD`（或命令行参数 `--db-username` / `--db-password`）。两者必须同时提供；只提供一个会报错。密码写在命令行会进入 shell 历史，建议放在 `.env` 中。
+
 工具启动时会从当前工作目录向上查找最近的 `.env` 并加载。已经通过 shell 导出的变量优先于文件内容，因此临时覆盖可以这样写：
 
 ```bash
@@ -57,6 +59,10 @@ uv run sie-atlas-ops index ./examples/indexes
 # - 设了 ATLAS_PROJECT_ID、没设 ATLAS_CLUSTER_NAME → 该参数是集群（名称或 ID）
 # - 否则 24 位十六进制 → project；非 24 位十六进制 → 集群名
 uv run sie-atlas-ops index ./examples/indexes cluster0
+
+# 使用已有数据库用户，跳过临时用户的创建、等待和删除
+uv run sie-atlas-ops index ./examples/indexes 64f1a2b3c4d5e6f7a8b9c0d1 cluster0 \
+  --db-username appUser --db-password '...'
 ```
 
 参数（按顺序）：
@@ -64,6 +70,11 @@ uv run sie-atlas-ops index ./examples/indexes cluster0
 - `DIRECTORY`：存放 `*.json` 的目录（不递归子目录）
 - `PROJECT`：project ID（24 位十六进制）；省略时依次取 `ATLAS_PROJECT_ID`、交互输入
 - `CLUSTER`：集群 ID 或名称；省略时依次取 `ATLAS_CLUSTER_NAME`、交互输入
+
+选项：
+
+- `--db-username` / `--db-password`：已有数据库用户；也可以使用 `ATLAS_DB_USERNAME` / `ATLAS_DB_PASSWORD`。两者必须同时提供，提供后不会创建或删除临时用户
+- 密码走命令行会进入 shell 历史，建议放在 `.env` 或使用环境变量
 
 集群名称先精确匹配，再尝试不区分大小写，且只在指定 project 内查找。
 
@@ -99,11 +110,12 @@ JSON 格式：
    或名称查找，多个同名集群时提示选择
 5. 拉取集群详情并列出全部连接串（standard / standardSrv / private / privateSrv /
    awsPrivateLink / privateEndpoint）；多个时提示选择
-6. 创建临时数据库用户：角色 `readWriteAnyDatabase`，通过 `scopes` 限定到当前集群，
-   `deleteAfterDate` 设为 6 小时后由 Atlas 自动删除
-7. 等待临时用户生效：用新凭据轮询需要认证的 `listDatabases`，认证失败（错误码 13/18）
-   时每 2 秒重试，最多等待 120 秒
-8. 用临时用户连接 MongoDB，检查每个定义文件中 `database` / `collection` 是否存在；
+6. 数据库用户：如果提供了 `--db-username` / `--db-password` 或对应环境变量，
+   直接使用该用户；否则创建临时用户（`readWriteAnyDatabase`，`scopes` 限定到当前
+   集群，`deleteAfterDate` 设为 6 小时后）
+7. 仅临时用户需要等待生效：用新凭据轮询需要认证的 `listDatabases`，认证失败
+   （错误码 13/18）时每 2 秒重试，最多等待 120 秒
+8. 用数据库用户连接 MongoDB，检查每个定义文件中 `database` / `collection` 是否存在；
    缺失的库或集合会逐条列出，并询问是否继续（默认不继续）
 9. 按 `keys` 的有序字段组合（不看索引名）匹配已有索引：
    - `options` 完全一致 → 输出一条 INFO 并跳过
@@ -111,18 +123,18 @@ JSON 格式：
 10. 对需要创建的索引执行 `createIndexes`：按 `(database, collection, commitQuorum)`
     分批，每批发一条命令；索引名取 options 里的 `name`，没有则按 MongoDB 规则生成
     （如 `a_1_b_-1`）；`commitQuorum` 放在命令级
-11. 无论正常结束、报错还是中止，退出前都调用 Atlas API 删除临时用户（只发送 DELETE，
-    不等待 MongoDB 侧生效；删除失败只记录 WARNING）
+11. 仅临时用户：无论正常结束、报错还是中止，退出前都调用 Atlas API 删除（只发送
+    DELETE，不等待 MongoDB 侧生效；删除失败只记录 WARNING）
 12. 输出集群、项目和已加载的索引定义摘要
 
-命令在创建索引后结束。创建数据库用户需要 Atlas API Key 具备相应权限
+命令在创建索引后结束。创建临时数据库用户需要 Atlas API Key 具备相应权限
 （例如 Project Owner 或 Project Database Access Admin）。
 
 比较 options 时会排除服务端字段 `v`、`key`；如果定义里没有写 `name`，已有索引的自动生成名也不会参与比较。
 
 如果确认继续，MongoDB 会在创建索引时隐式创建缺失的库和集合；选择中止则退出码为 1。
 
-临时用户的凭据只在运行期间存在，不再输出到摘要。`deleteAfterDate` 的 6 小时过期仍作为兜底，防止进程被强杀时用户永久残留。
+临时用户的凭据只在运行期间存在，不再输出到摘要。`deleteAfterDate` 的 6 小时过期仍作为兜底，防止进程被强杀时用户永久残留。提供自有数据库凭据时不会创建临时用户，也不会执行删除。
 
 ## 日志
 

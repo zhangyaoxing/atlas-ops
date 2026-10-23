@@ -140,6 +140,8 @@ class FakeMongoClient:
 @pytest.fixture(autouse=True)
 def mongo(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     """Replace the MongoDB client with one where exampleDB.example exists."""
+    monkeypatch.delenv("ATLAS_DB_USERNAME", raising=False)
+    monkeypatch.delenv("ATLAS_DB_PASSWORD", raising=False)
     client = FakeMongoClient({"exampleDB": ["example"]})
     uris: list[str] = []
 
@@ -253,6 +255,81 @@ def test_index_creates_temporary_user(tmp_path: Path, monkeypatch: pytest.Monkey
         f"/groups/{GROUP_A.id}/databaseUsers/admin/{payload['username']}"
     ]
     assert payload["password"] not in result.output
+
+
+def test_index_uses_provided_credentials(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mongo: SimpleNamespace
+) -> None:
+    _write_definitions(tmp_path)
+    client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail(standard="mongodb://only"))
+    _patch_client(monkeypatch, client)
+
+    result = runner.invoke(
+        app,
+        [
+            "index",
+            str(tmp_path),
+            GROUP_A.id,
+            "cluster0",
+            "--db-username",
+            "appUser",
+            "--db-password",
+            "S3cret!",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert client.created_user_payload is None
+    assert client.deleted_user_paths == []
+    assert "Using provided database user" in result.output
+    assert "Created temporary user" not in result.output
+    assert "Waiting for temporary user" not in result.output
+    assert f"{quote('appUser', safe='')}:{quote('S3cret!', safe='')}@" in mongo.uris[0]
+    assert "S3cret!" not in result.output
+
+
+def test_index_uses_provided_credentials_from_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mongo: SimpleNamespace
+) -> None:
+    _write_definitions(tmp_path)
+    client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail(standard="mongodb://only"))
+    _patch_client(monkeypatch, client)
+    monkeypatch.setenv("ATLAS_DB_USERNAME", "envUser")
+    monkeypatch.setenv("ATLAS_DB_PASSWORD", "envPass")
+
+    result = runner.invoke(app, ["index", str(tmp_path), GROUP_A.id, "cluster0"])
+
+    assert result.exit_code == 0, result.output
+    assert client.created_user_payload is None
+    assert client.deleted_user_paths == []
+    assert f"{quote('envUser', safe='')}:{quote('envPass', safe='')}@" in mongo.uris[0]
+
+
+@pytest.mark.parametrize(
+    "extra_args",
+    [
+        ["--db-username", "only-user"],
+        ["--db-password", "only-password"],
+    ],
+)
+def test_index_requires_both_provided_credentials(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    extra_args: list[str],
+) -> None:
+    _write_definitions(tmp_path)
+    client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail(standard="mongodb://only"))
+    _patch_client(monkeypatch, client)
+
+    result = runner.invoke(
+        app,
+        ["index", str(tmp_path), GROUP_A.id, "cluster0", *extra_args],
+    )
+
+    assert result.exit_code == 1
+    assert "Provide both a database username and password" in result.output
+    assert client.created_user_payload is None
+    assert client.deleted_user_paths == []
 
 
 def test_index_creates_pending_indexes(
