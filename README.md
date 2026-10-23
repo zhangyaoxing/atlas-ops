@@ -5,7 +5,7 @@ Command-line tool for SIE Atlas operations.
 ## Requirements
 
 - [uv](https://docs.astral.sh/uv/)
-- Python 3.10 or newer (`requires-python = ">=3.10"`)
+- Python 3.10 (pinned in `.python-version`; uv selects it automatically)
 
 ## Quick start
 
@@ -316,6 +316,7 @@ source .venv/bin/activate
 .
 ├── pyproject.toml                    # project metadata, dependencies, tool config
 ├── uv.lock                           # locked dependency versions
+├── .python-version                   # pins Python 3.10
 ├── .env.example                      # environment variable template (copy to .env)
 ├── .vscode/                          # VS Code debug, test, and format config
 ├── LICENSE                           # project license
