@@ -207,6 +207,10 @@ def test_index_help_documents_arguments() -> None:
     assert "directory" in result.stdout
     assert "--project-id" in result.stdout
     assert "--cluster" in result.stdout
+    assert "-g" in result.stdout
+    assert "-c" in result.stdout
+    assert "-u" in result.stdout
+    assert "-p" in result.stdout
 
 
 def test_index_selects_connection_string(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -294,6 +298,35 @@ def test_index_uses_provided_credentials(
     assert "Waiting for temporary user" not in result.output
     assert f"{quote('appUser', safe='')}:{quote('S3cret!', safe='')}@" in mongo.uris[0]
     assert "S3cret!" not in result.output
+
+
+def test_index_accepts_short_options(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mongo: SimpleNamespace
+) -> None:
+    _write_definitions(tmp_path)
+    client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail(standard="mongodb://only"))
+    _patch_client(monkeypatch, client)
+
+    result = runner.invoke(
+        app,
+        [
+            "index",
+            str(tmp_path),
+            "-g",
+            GROUP_A.id,
+            "-c",
+            "cluster0",
+            "-u",
+            "shortUser",
+            "-p",
+            "shortPass!",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert client.created_user_payload is None
+    assert client.deleted_user_paths == []
+    assert f"{quote('shortUser', safe='')}:{quote('shortPass!', safe='')}@" in mongo.uris[0]
 
 
 def test_index_uses_provided_credentials_from_environment(

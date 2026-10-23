@@ -51,6 +51,10 @@ ATLAS_PUBLIC_KEY=... ATLAS_PRIVATE_KEY=... uv run sie-atlas-ops index ./examples
 uv run sie-atlas-ops index ./examples/indexes \
   --project-id 64f1a2b3c4d5e6f7a8b9c0d1 --cluster cluster0
 
+# 同样的参数可以用短选项
+uv run sie-atlas-ops index ./examples/indexes \
+  -g 64f1a2b3c4d5e6f7a8b9c0d1 -c cluster0
+
 # 集群 ID 也可以（24 位十六进制）
 uv run sie-atlas-ops index ./examples/indexes \
   --project-id 64f1a2b3c4d5e6f7a8b9c0d1 --cluster b1c2d3e4f5a6b7c8d9e0f1a2
@@ -70,9 +74,9 @@ uv run sie-atlas-ops index ./examples/indexes \
 
 选项：
 
-- `--project-id`：project ID（24 位十六进制）；省略时依次取 `ATLAS_PROJECT_ID`、交互输入
-- `--cluster`：集群 ID 或名称；省略时依次取 `ATLAS_CLUSTER_NAME`、交互输入
-- `--db-username` / `--db-password`：已有数据库用户；也可以使用 `ATLAS_DB_USERNAME` / `ATLAS_DB_PASSWORD`。两者必须同时提供，提供后不会创建或删除临时用户
+- `-g, --project-id`：project ID（24 位十六进制）；省略时依次取 `ATLAS_PROJECT_ID`、交互输入
+- `-c, --cluster`：集群 ID 或名称；省略时依次取 `ATLAS_CLUSTER_NAME`、交互输入
+- `-u, --db-username` / `-p, --db-password`：已有数据库用户；也可以使用 `ATLAS_DB_USERNAME` / `ATLAS_DB_PASSWORD`。两者必须同时提供，提供后不会创建或删除临时用户
 - 密码走命令行会进入 shell 历史，建议放在 `.env` 或使用环境变量
 
 集群名称先精确匹配，再尝试不区分大小写，且只在指定 project 内查找。

@@ -114,6 +114,7 @@ def index(
     project: str | None = typer.Option(
         None,
         "--project-id",
+        "-g",
         help=(
             "Atlas project ID (24 hexadecimal characters). "
             f"Falls back to {PROJECT_ID_ENV}, then prompts."
@@ -122,11 +123,13 @@ def index(
     cluster: str | None = typer.Option(
         None,
         "--cluster",
+        "-c",
         help=(f"Atlas cluster ID or name. Falls back to {CLUSTER_NAME_ENV}, then prompts."),
     ),
     db_username: str | None = typer.Option(
         None,
         "--db-username",
+        "-u",
         help=(
             "Existing database username. Falls back to "
             f"{DB_USERNAME_ENV}; requires a password and skips the "
@@ -136,6 +139,7 @@ def index(
     db_password: str | None = typer.Option(
         None,
         "--db-password",
+        "-p",
         help=(
             "Existing database password. Falls back to "
             f"{DB_PASSWORD_ENV}; requires a username and skips the "
