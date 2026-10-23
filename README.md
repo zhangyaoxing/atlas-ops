@@ -81,6 +81,8 @@ uv run sie-atlas-ops index ./examples/indexes \
 
 集群名称先精确匹配，再尝试不区分大小写，且只在指定 project 内查找。
 
+连接串字段可能是字符串、列表或字典：字符串直接作为选项，列表逐项展开，字典逐值展开（嵌套结构递归展开）；只接受以 `mongodb://` 或 `mongodb+srv://` 开头的值，最终每个连接串作为一个选项供选择。
+
 JSON 格式：
 
 ```json
@@ -111,8 +113,9 @@ JSON 格式：
 3. 解析 project：`--project-id` → `ATLAS_PROJECT_ID` → 交互输入（校验 24 位十六进制）
 4. 解析集群：`--cluster` → `ATLAS_CLUSTER_NAME` → 交互输入；在指定 project 内按 ID
    或名称查找，多个同名集群时提示选择
-5. 拉取集群详情并列出全部连接串（standard / standardSrv / private / privateSrv /
-   awsPrivateLink / privateEndpoint）；多个时提示选择
+5. 拉取集群详情并列出全部连接串（字符串、列表、字典会自动展开为独立选项；
+   如 standard / standardSrv / private / privateSrv / awsPrivateLink / privateEndpoint）；
+   多个时提示选择
 6. 数据库用户：如果提供了 `--db-username` / `--db-password` 或对应环境变量，
    直接使用该用户；否则创建临时用户（`readWriteAnyDatabase`，`scopes` 限定到当前
    集群，`deleteAfterDate` 设为 6 小时后）

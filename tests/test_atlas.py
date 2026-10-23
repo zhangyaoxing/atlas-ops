@@ -12,6 +12,7 @@ from pyatlassdk.models.cluster_description20240805 import ClusterDescription2024
 
 from sie_atlas_ops.atlas import (
     ClusterTarget,
+    ConnectionOption,
     ProjectTarget,
     client_from_env,
     connection_options,
@@ -192,6 +193,21 @@ def _cluster(payload: dict[str, Any]) -> ClusterDescription20240805:
     return ClusterDescription20240805.model_validate(payload)
 
 
+def _options_from(**overrides: Any) -> list[ConnectionOption]:
+    values: dict[str, Any] = {
+        "standard": None,
+        "standard_srv": None,
+        "private": None,
+        "private_srv": None,
+        "aws_private_link": None,
+        "aws_private_link_srv": None,
+        "private_endpoint": None,
+        "model_extra": {},
+    }
+    values.update(overrides)
+    return connection_options(SimpleNamespace(connection_strings=SimpleNamespace(**values)))
+
+
 def test_connection_options_cover_every_flavour() -> None:
     cluster = _cluster(
         {
@@ -222,11 +238,47 @@ def test_connection_options_cover_every_flavour() -> None:
     assert options["private_srv"] == "mongodb+srv://private"
     assert options["aws_private_link[vpce-1]"] == "mongodb://aws"
     assert options["aws_private_link_srv[vpce-2]"] == "mongodb+srv://aws"
-    assert options["private_endpoint[eu-west-1, us-east-1]"] == "mongodb://pe"
-    assert options["private_endpoint_srv[eu-west-1, us-east-1]"] == "mongodb+srv://pe"
-    assert options["private_endpoint_srv_shard_optimized[eu-west-1, us-east-1]"] == (
-        "mongodb+srv://pe-optimized"
+    assert options["private_endpoint[0].connection_string"] == "mongodb://pe"
+    assert options["private_endpoint[0].srv_connection_string"] == "mongodb+srv://pe"
+    assert (
+        options["private_endpoint[0].srv_shard_optimized_connection_string"]
+        == "mongodb+srv://pe-optimized"
     )
+
+
+def test_connection_options_expands_list_values() -> None:
+    options = _options_from(aws_private_link={"vpce-1": ["mongodb://one", "mongodb://two"]})
+
+    assert [(item.label, item.uri) for item in options] == [
+        ("aws_private_link[vpce-1][0]", "mongodb://one"),
+        ("aws_private_link[vpce-1][1]", "mongodb://two"),
+    ]
+
+
+def test_connection_options_expands_dict_values() -> None:
+    options = _options_from(aws_private_link={"vpce-1": {"primary": "mongodb://primary"}})
+
+    assert [(item.label, item.uri) for item in options] == [
+        ("aws_private_link[vpce-1][primary]", "mongodb://primary"),
+    ]
+
+
+def test_connection_options_expands_unknown_list_and_dict_fields() -> None:
+    cluster = _cluster(
+        {
+            "connectionStrings": {
+                "customList": ["mongodb://list", "not-a-uri"],
+                "customMap": {"key": "mongodb+srv://map"},
+            }
+        }
+    )
+
+    options = connection_options(cluster)
+
+    assert [(item.label, item.uri) for item in options] == [
+        ("customList[0]", "mongodb://list"),
+        ("customMap[key]", "mongodb+srv://map"),
+    ]
 
 
 def test_connection_options_deduplicate_uris() -> None:

@@ -16,6 +16,7 @@ from pyatlassdk import AtlasApiError, AtlasClient
 from pyatlassdk.models.cloud_database_user import CloudDatabaseUser
 from pyatlassdk.models.database_user_role import DatabaseUserRole
 from pyatlassdk.models.user_scope import UserScope
+from pydantic import BaseModel
 
 from sie_atlas_ops.errors import AtlasOperationError, ConfigurationError
 
@@ -33,6 +34,17 @@ TEMPORARY_USER_TTL_HOURS = 6
 _TEMPORARY_USER_PREFIX = "sie_atlas_ops_"
 _PASSWORD_SYMBOLS = "!@#$%^&*"
 _DATABASE_USER_ACCEPT = "application/vnd.atlas.2023-01-01+json"
+
+_CONNECTION_FIELDS = (
+    "standard",
+    "standard_srv",
+    "private",
+    "private_srv",
+    "aws_private_link",
+    "aws_private_link_srv",
+    "private_endpoint",
+)
+_URI_PREFIXES = ("mongodb://", "mongodb+srv://")
 
 _OBJECT_ID_PATTERN = re.compile(r"^[0-9a-fA-F]{24}$")
 _PAGE_SIZE = 100
@@ -164,36 +176,42 @@ def find_clusters(
 
 
 def connection_options(cluster: ClusterDescription20240805) -> list[ConnectionOption]:
-    """Collect every connection string on *cluster*, de-duplicated by URI."""
+    """Collect every connection string on *cluster*, de-duplicated by URI.
+
+    Atlas returns some entries as strings but others as lists or dictionaries.
+    Strings are collected directly, list items and dictionary values are
+    expanded recursively, and only values that look like MongoDB URIs are kept.
+    """
     strings = cluster.connection_strings
     if strings is None:
         return []
 
     options: list[ConnectionOption] = []
-
-    def add(label: str, uri: str | None) -> None:
-        if uri:
-            options.append(ConnectionOption(label=label, uri=uri))
-
-    add("standard", strings.standard)
-    add("standard_srv", strings.standard_srv)
-    add("private", strings.private)
-    add("private_srv", strings.private_srv)
-    for name, uri in _extra_strings(strings.aws_private_link):
-        add(f"aws_private_link[{name}]", uri)
-    for name, uri in _extra_strings(strings.aws_private_link_srv):
-        add(f"aws_private_link_srv[{name}]", uri)
-
-    for entry in strings.private_endpoint or []:
-        regions = _regions(entry)
-        add(f"private_endpoint[{regions}]", entry.connection_string)
-        add(f"private_endpoint_srv[{regions}]", entry.srv_connection_string)
-        add(
-            f"private_endpoint_srv_shard_optimized[{regions}]",
-            entry.srv_shard_optimized_connection_string,
-        )
-
+    for field_name in _CONNECTION_FIELDS:
+        _collect_options(getattr(strings, field_name, None), field_name, options)
+    for key, value in (strings.model_extra or {}).items():
+        _collect_options(value, str(key), options)
     return _dedupe(options)
+
+
+def _collect_options(value: Any, label: str, options: list[ConnectionOption]) -> None:
+    if isinstance(value, str):
+        if value.startswith(_URI_PREFIXES):
+            options.append(ConnectionOption(label=label, uri=value))
+        return
+    if isinstance(value, BaseModel):
+        for field_name in type(value).model_fields:
+            _collect_options(getattr(value, field_name), f"{label}.{field_name}", options)
+        for key, extra in (value.model_extra or {}).items():
+            _collect_options(extra, f"{label}[{key}]", options)
+        return
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            _collect_options(item, f"{label}[{key}]", options)
+        return
+    if isinstance(value, (list, tuple)):
+        for index, item in enumerate(value):
+            _collect_options(item, f"{label}[{index}]", options)
 
 
 def create_temporary_user(
@@ -302,19 +320,6 @@ def _iter_clusters(client: AtlasClientLike, group_id: str) -> Iterator[Any]:
         if len(results) < _PAGE_SIZE or (total is not None and seen >= total):
             return
         page_number += 1
-
-
-def _extra_strings(model: Any) -> Iterator[tuple[str, str]]:
-    """Yield the dynamic (``extra``) string entries of an AWS PrivateLink model."""
-    extras = getattr(model, "model_extra", None) or {}
-    for name, uri in extras.items():
-        if isinstance(uri, str) and uri:
-            yield str(name), uri
-
-
-def _regions(entry: Any) -> str:
-    regions = sorted({endpoint.region for endpoint in (entry.endpoints or []) if endpoint.region})
-    return ", ".join(regions) or "unknown region"
 
 
 def _dedupe(options: list[ConnectionOption]) -> list[ConnectionOption]:
