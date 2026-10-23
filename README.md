@@ -225,11 +225,11 @@ collection by collection:
 
 Export summary (2 collection(s) from /path/to/exported-indexes):
 
-| Collection | Exported |
-| --- | ---: |
-| exampleDB.orders | 1 |
-| exampleDB.users | 2 |
-| **Total** | **3** |
+| Collection       | Exported |
+| ---------------- | -------: |
+| exampleDB.orders |        1 |
+| exampleDB.users  |        2 |
+| **Total**        |    **3** |
 
 The default mode ends after creating/deleting indexes; export mode ends after writing
 files and printing the summary. Creating a temporary database user requires an Atlas

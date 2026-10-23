@@ -638,13 +638,21 @@ def _print_export_summary(
 
 
 def _format_export_table(rows: list[tuple[str, int]]) -> str:
-    total = sum(count for _, count in rows)
-    lines = [
-        "| Collection | Exported |",
-        "| --- | ---: |",
+    header = ("Collection", "Exported")
+    total = ("**Total**", f"**{sum(count for _, count in rows)}**")
+    body = [(_markdown_cell(namespace), str(count)) for namespace, count in rows]
+    widths = [
+        max(len(cells[0]) for cells in [header, *body, total]),
+        max(len(cells[1]) for cells in [header, *body, total]),
     ]
-    lines.extend(f"| {_markdown_cell(namespace)} | {count} |" for namespace, count in rows)
-    lines.append(f"| **Total** | **{total}** |")
+
+    def render(cells: tuple[str, str]) -> str:
+        return f"| {cells[0].ljust(widths[0])} | {cells[1].rjust(widths[1])} |"
+
+    separator = f"| {'-' * widths[0]} | {'-' * (widths[1] - 1)}: |"
+    lines = [render(header), separator]
+    lines.extend(render(cells) for cells in body)
+    lines.append(render(total))
     return "\n".join(lines)
 
 

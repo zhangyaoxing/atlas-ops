@@ -17,7 +17,7 @@ from pymongo.errors import PyMongoError
 from typer.testing import CliRunner
 
 from sie_atlas_ops import __version__
-from sie_atlas_ops.cli import app
+from sie_atlas_ops.cli import _format_export_table, app
 
 runner = CliRunner()
 
@@ -642,10 +642,13 @@ def test_index_export_writes_files_without_mutating_indexes(
     ]
     assert mongo_client.commands == []
     assert "Export summary (1 collection(s)" in result.output
-    assert "| Collection | Exported |" in result.output
-    assert "| --- | ---: |" in result.output
-    assert "| exampleDB.example | 1 |" in result.output
-    assert "| **Total** | **1** |" in result.output
+    assert re.search(r"^\| Collection\s+\| Exported \|$", result.output, re.MULTILINE)
+    assert re.search(r"^\| exampleDB\.example\s+\|\s+1 \|$", result.output, re.MULTILINE)
+    assert re.search(
+        r"^\| \*\*Total\*\*\s+\|\s+\*\*1\*\* \|$",
+        result.output,
+        re.MULTILINE,
+    )
     assert "Exported 1 index(es) from 1 collection(s)" in result.output
     assert "Index creation complete" not in result.output
     assert client.created_user_payload is not None
@@ -1222,3 +1225,21 @@ def test_index_logs_when_values_come_from_environment(
         "Using cluster [green]cluster0[/green] from ATLAS_CLUSTER_NAME" in message
         for message in handler.messages
     )
+
+
+def test_export_table_is_padded_for_bash() -> None:
+    table = _format_export_table([("exampleDB.orders", 1), ("exampleDB.users", 2)])
+
+    assert table == (
+        "| Collection       | Exported |\n"
+        "| ---------------- | -------: |\n"
+        "| exampleDB.orders |        1 |\n"
+        "| exampleDB.users  |        2 |\n"
+        "| **Total**        |    **3** |"
+    )
+
+
+def test_export_table_escapes_pipes() -> None:
+    table = _format_export_table([("db.a|b", 1)])
+
+    assert "| db.a\\|b" in table
