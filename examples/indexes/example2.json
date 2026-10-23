@@ -1,0 +1,15 @@
+{
+  "database": "exampleDB",
+  "collection": "example_2",
+  "indexes": [
+    {
+      "keys": {
+        "field": 1
+      },
+      "options": {
+        "expireAfterSeconds": 3600
+      },
+      "commitQuorum": 1
+    }
+  ]
+}

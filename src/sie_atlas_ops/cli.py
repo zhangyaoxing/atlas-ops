@@ -338,6 +338,7 @@ def _log_index_plan(plan: list[IndexPlanItem]) -> None:
             requested_options = escape(
                 json.dumps(item.spec.options or {}, default=str, sort_keys=True)
             )
+            logger.warning("[yellow]Altering index is not currently implemented.[/yellow]")
             logger.warning(
                 'Index %s on "%s.%s" already exists with different options '
                 '(existing name "%s", existing options %s, requested options %s); '

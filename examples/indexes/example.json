@@ -3,9 +3,20 @@
   "collection": "example",
   "indexes": [
     {
-      "keys": { "field": 1 },
-      "options": { "name": "field_index" },
+      "keys": {
+        "field": 1
+      },
+      "options": {
+        "name": "field_index_1",
+        "unique": true
+      },
       "commitQuorum": 1
+    },
+    {
+      "keys": {
+        "field": 1,
+        "field_2": 1
+      }
     }
   ]
 }
