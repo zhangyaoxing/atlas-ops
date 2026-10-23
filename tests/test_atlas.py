@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from pyatlassdk import AtlasApiError
+from pyatlassdk.models.cloud_database_user import CloudDatabaseUser
 from pyatlassdk.models.cluster_description20240805 import ClusterDescription20240805
 
 from sie_atlas_ops.atlas import (
@@ -12,6 +14,7 @@ from sie_atlas_ops.atlas import (
     ProjectTarget,
     client_from_env,
     connection_options,
+    create_temporary_user,
     describe_atlas_error,
     find_clusters,
     get_project,
@@ -251,3 +254,62 @@ def test_describe_atlas_error_handles_text_payload() -> None:
     error = AtlasApiError(500, "boom", "internal error")
 
     assert describe_atlas_error(error) == "Atlas API request failed (HTTP 500): internal error"
+
+
+class _UserRequestClient:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    def request(self, method: str, path: str, **kwargs: Any) -> Any:
+        self.calls.append({"method": method, "path": path, **kwargs})
+        return CloudDatabaseUser.model_validate(kwargs["json"])
+
+
+def test_create_temporary_user_sends_cluster_scoped_role() -> None:
+    client = _UserRequestClient()
+
+    user = create_temporary_user(
+        client,
+        PROJECT_A,
+        "cluster0",
+        username="tmp_user",
+        password="Str0ng!pass",
+    )
+
+    assert user.username == "tmp_user"
+    assert user.password == "Str0ng!pass"
+    assert user.delete_after.tzinfo is not None
+
+    call = client.calls[0]
+    assert call["method"] == "POST"
+    assert call["path"] == f"/groups/{GROUP_A.id}/databaseUsers"
+    assert call["accept"] == "application/vnd.atlas.2023-01-01+json"
+    assert call["content_type"] == call["accept"]
+
+    payload = call["json"]
+    assert payload["groupId"] == GROUP_A.id
+    assert payload["username"] == "tmp_user"
+    assert payload["password"] == "Str0ng!pass"
+    assert payload["databaseName"] == "admin"
+    assert payload["roles"] == [{"databaseName": "admin", "roleName": "readWriteAnyDatabase"}]
+    assert payload["scopes"] == [{"name": "cluster0", "type": "CLUSTER"}]
+    assert isinstance(payload["deleteAfterDate"], str)
+
+    delete_after = datetime.fromisoformat(payload["deleteAfterDate"].replace("Z", "+00:00"))
+    remaining = delete_after - datetime.now(timezone.utc)
+    assert timedelta(hours=5, minutes=59) <= remaining <= timedelta(hours=6, minutes=1)
+
+
+def test_create_temporary_user_generates_credentials() -> None:
+    client = _UserRequestClient()
+
+    user = create_temporary_user(client, PROJECT_A, "cluster0", ttl_hours=1)
+
+    assert user.username.startswith("sie_atlas_ops_")
+    assert len(user.password) >= 12
+    assert any(char.islower() for char in user.password)
+    assert any(char.isupper() for char in user.password)
+    assert any(char.isdigit() for char in user.password)
+    assert any(char in "!@#$%^&*" for char in user.password)
+    remaining = user.delete_after - datetime.now(timezone.utc)
+    assert timedelta(minutes=59) <= remaining <= timedelta(hours=1, minutes=1)

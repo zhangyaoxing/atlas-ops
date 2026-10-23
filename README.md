@@ -99,9 +99,24 @@ JSON 格式：
    或名称查找，多个同名集群时提示选择
 5. 拉取集群详情并列出全部连接串（standard / standardSrv / private / privateSrv /
    awsPrivateLink / privateEndpoint）；多个时提示选择
-6. 输出集群、项目和已加载的索引定义摘要
+6. 创建临时数据库用户：角色 `readWriteAnyDatabase`，通过 `scopes` 限定到当前集群，
+   `deleteAfterDate` 设为 6 小时后由 Atlas 自动删除
+7. 输出集群、项目、临时用户凭据和已加载的索引定义摘要
 
-索引创建本身尚未实现，命令在选定连接串后结束。
+命令在创建临时用户后结束，索引创建本身尚未实现。创建数据库用户需要 Atlas API Key
+具备相应权限（例如 Project Owner 或 Project Database Access Admin）。
+
+摘要中的临时用户凭据只写到 stdout，不会进入日志：
+
+```text
+Temporary user: sie_atlas_ops_6c4c1581ad60
+Password:       BK%m18!EdoJA3X*c2wE79&Ws
+Expires:        2026-10-23 17:53:15 UTC
+```
+
+密码是随机生成的，包含大小写字母、数字和特殊字符；后续把它拼进连接串时需要 URL 编码。
+
+## 日志
 
 ## 日志
 

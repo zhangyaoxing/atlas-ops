@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from pyatlassdk import AtlasApiError
+from pyatlassdk.models.cloud_database_user import CloudDatabaseUser
 from pyatlassdk.models.cluster_description20240805 import ClusterDescription20240805
 from typer.testing import CliRunner
 
@@ -32,11 +34,16 @@ class FakeAtlasClient:
         self._detail = detail
         self.get_group_calls: list[str] = []
         self.get_cluster_calls: list[tuple[str, str]] = []
+        self.created_user_payload: dict[str, Any] | None = None
         self.projects = SimpleNamespace(get_group=self._get_group)
         self.clusters = SimpleNamespace(
             list_group_clusters=self._list_clusters,
             get_group_cluster=self._get_cluster,
         )
+
+    def request(self, method: str, path: str, **kwargs: Any) -> Any:
+        self.created_user_payload = kwargs["json"]
+        return CloudDatabaseUser.model_validate(kwargs["json"])
 
     def _get_group(self, group_id: str, **_: Any) -> Any:
         self.get_group_calls.append(group_id)
@@ -140,6 +147,33 @@ def test_index_selects_connection_string(tmp_path: Path, monkeypatch: pytest.Mon
     assert "Index creation is not implemented" in result.output
     assert client.get_group_calls == [GROUP_A.id]
     assert client.get_cluster_calls == [("cluster0", GROUP_A.id)]
+
+
+def test_index_creates_temporary_user(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _write_definitions(tmp_path)
+    client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail(standard="mongodb://only"))
+    _patch_client(monkeypatch, client)
+
+    result = runner.invoke(app, ["index", str(tmp_path), GROUP_A.id, "cluster0"])
+
+    assert result.exit_code == 0, result.output
+    payload = client.created_user_payload
+    assert payload is not None
+    assert payload["groupId"] == GROUP_A.id
+    assert payload["databaseName"] == "admin"
+    assert payload["roles"] == [{"databaseName": "admin", "roleName": "readWriteAnyDatabase"}]
+    assert payload["scopes"] == [{"name": "cluster0", "type": "CLUSTER"}]
+    assert payload["username"].startswith("sie_atlas_ops_")
+    assert len(payload["password"]) >= 8
+    json.dumps(payload)  # the body must be JSON-serializable
+
+    delete_after = datetime.fromisoformat(payload["deleteAfterDate"].replace("Z", "+00:00"))
+    remaining = delete_after - datetime.now(timezone.utc)
+    assert timedelta(hours=5, minutes=59) <= remaining <= timedelta(hours=6, minutes=1)
+
+    assert f"Temporary user: {payload['username']}" in result.output
+    assert f"Password:       {payload['password']}" in result.output
+    assert "Expires:" in result.output
 
 
 def test_index_accepts_cluster_id(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -484,6 +518,9 @@ def test_index_logs_found_cluster_and_connection_strings(
         'Selected connection string [cyan]standard_srv[/cyan]: "mongodb+srv://srv"' in message
         for message in handler.messages
     )
+    assert any("Created temporary user [cyan]" in message for message in handler.messages)
+    password = client.created_user_payload["password"]
+    assert all(password not in message for message in handler.messages)
 
 
 def test_index_logs_lookup_by_id(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

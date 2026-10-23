@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import NoReturn
 
@@ -28,8 +29,10 @@ from sie_atlas_ops.atlas import (
     PROJECT_ID_ENV,
     ClusterTarget,
     ConnectionOption,
+    TemporaryUser,
     client_from_env,
     connection_options,
+    create_temporary_user,
     describe_atlas_error,
     find_clusters,
     get_project,
@@ -109,7 +112,9 @@ def index(
     Every ``*.json`` file in DIRECTORY is parsed and validated. The project is
     resolved from the argument, the environment, or an interactive prompt; the
     cluster is looked up inside that project, and one of its connection strings
-    is selected interactively. Creating the indexes is not implemented yet.
+    is selected interactively. A cluster-scoped temporary database user is then
+    created and expires after six hours. Creating the indexes is not
+    implemented yet.
     """
     try:
         definitions = load_index_definitions(directory)
@@ -137,6 +142,12 @@ def index(
                 escape(selected.label),
                 escape(selected.uri),
             )
+            temporary_user = create_temporary_user(client, target_project, target.cluster_name)
+            logger.info(
+                "Created temporary user [cyan]%s[/cyan] (expires %s UTC)",
+                escape(temporary_user.username),
+                _format_utc(temporary_user.delete_after),
+            )
     except OpsError as exc:
         _fail(str(exc))
     except AtlasApiError as exc:
@@ -144,7 +155,7 @@ def index(
     except httpx.HTTPError as exc:
         _fail(f"Could not reach the Atlas API: {exc}")
 
-    _print_summary(directory, definitions, target, selected)
+    _print_summary(directory, definitions, target, selected, temporary_user)
 
 
 def _resolve_references(project: str | None, cluster: str | None) -> tuple[str, str]:
@@ -265,12 +276,17 @@ def _print_summary(
     definitions: list[CollectionIndexes],
     target: ClusterTarget,
     selected: ConnectionOption,
+    temporary_user: TemporaryUser,
 ) -> None:
     typer.echo("")
     typer.echo(f"Cluster:    {target.cluster_name} ({target.cluster_id or 'unknown ID'})")
     typer.echo(f"Project:    {target.project_name} ({target.project_id})")
     typer.echo(f'Connection: "{selected.uri}"')
     typer.echo(f"            [{selected.label}]")
+    typer.echo("")
+    typer.echo(f"Temporary user: {temporary_user.username}")
+    typer.echo(f"Password:       {temporary_user.password}")
+    typer.echo(f"Expires:        {_format_utc(temporary_user.delete_after)} UTC")
     typer.echo("")
     typer.echo(f"Loaded {len(definitions)} collection definition(s) from {directory}:")
     for definition in definitions:
@@ -280,6 +296,10 @@ def _print_summary(
         )
     typer.echo("")
     typer.echo("Index creation is not implemented yet; stopping after connection selection.")
+
+
+def _format_utc(value: datetime) -> str:
+    return value.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _fail(message: str) -> NoReturn:

@@ -4,11 +4,17 @@ from __future__ import annotations
 
 import os
 import re
+import secrets
+import string
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Protocol
 
 from pyatlassdk import AtlasApiError, AtlasClient
+from pyatlassdk.models.cloud_database_user import CloudDatabaseUser
+from pyatlassdk.models.database_user_role import DatabaseUserRole
+from pyatlassdk.models.user_scope import UserScope
 
 from sie_atlas_ops.errors import AtlasOperationError, ConfigurationError
 
@@ -19,6 +25,11 @@ PUBLIC_KEY_ENV = "ATLAS_PUBLIC_KEY"
 PRIVATE_KEY_ENV = "ATLAS_PRIVATE_KEY"
 PROJECT_ID_ENV = "ATLAS_PROJECT_ID"
 CLUSTER_NAME_ENV = "ATLAS_CLUSTER_NAME"
+
+TEMPORARY_USER_TTL_HOURS = 6
+_TEMPORARY_USER_PREFIX = "sie_atlas_ops_"
+_PASSWORD_SYMBOLS = "!@#$%^&*"
+_DATABASE_USER_ACCEPT = "application/vnd.atlas.2023-01-01+json"
 
 _OBJECT_ID_PATTERN = re.compile(r"^[0-9a-fA-F]{24}$")
 _PAGE_SIZE = 100
@@ -39,6 +50,8 @@ class AtlasClientLike(Protocol):
 
     projects: _ProjectsAPI
     clusters: _ClustersAPI
+
+    def request(self, method: str, path: str, **kwargs: Any) -> Any: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +78,15 @@ class ConnectionOption:
 
     label: str
     uri: str
+
+
+@dataclass(frozen=True, slots=True)
+class TemporaryUser:
+    """A database user created for one index-creation run."""
+
+    username: str
+    password: str
+    delete_after: datetime
 
 
 def is_object_id(value: str) -> bool:
@@ -169,6 +191,72 @@ def connection_options(cluster: ClusterDescription20240805) -> list[ConnectionOp
         )
 
     return _dedupe(options)
+
+
+def create_temporary_user(
+    client: AtlasClientLike,
+    project: ProjectTarget,
+    cluster_name: str,
+    *,
+    ttl_hours: int = TEMPORARY_USER_TTL_HOURS,
+    username: str | None = None,
+    password: str | None = None,
+) -> TemporaryUser:
+    """Create a cluster-scoped database user that Atlas deletes after *ttl_hours*.
+
+    The user gets ``readWriteAnyDatabase`` on ``admin``. The request body is
+    sent as a JSON-ready dict because the SDK serializes pydantic models with
+    ``model_dump()``, which leaves ``datetime`` objects that httpx cannot
+    encode.
+    """
+    username = username or _generate_username()
+    password = password or _generate_password()
+    delete_after = datetime.now(timezone.utc) + timedelta(hours=ttl_hours)
+
+    body = CloudDatabaseUser(
+        group_id=project.project_id,
+        username=username,
+        password=password,
+        database_name="admin",
+        roles=[
+            DatabaseUserRole(
+                role_name="readWriteAnyDatabase",
+                database_name="admin",
+            )
+        ],
+        scopes=[UserScope(name=cluster_name, type="CLUSTER")],
+        delete_after_date=delete_after,
+    )
+    created = client.request(
+        method="POST",
+        path=f"/groups/{project.project_id}/databaseUsers",
+        json=body.model_dump(by_alias=True, exclude_none=True, mode="json"),
+        response_model=CloudDatabaseUser,
+        accept=_DATABASE_USER_ACCEPT,
+        content_type=_DATABASE_USER_ACCEPT,
+    )
+    return TemporaryUser(
+        username=created.username,
+        password=password,
+        delete_after=created.delete_after_date or delete_after,
+    )
+
+
+def _generate_username() -> str:
+    return f"{_TEMPORARY_USER_PREFIX}{secrets.token_hex(6)}"
+
+
+def _generate_password(length: int = 24) -> str:
+    alphabet = string.ascii_letters + string.digits + _PASSWORD_SYMBOLS
+    while True:
+        candidate = "".join(secrets.choice(alphabet) for _ in range(length))
+        if (
+            any(char.islower() for char in candidate)
+            and any(char.isupper() for char in candidate)
+            and any(char.isdigit() for char in candidate)
+            and any(char in _PASSWORD_SYMBOLS for char in candidate)
+        ):
+            return candidate
 
 
 def describe_atlas_error(exc: AtlasApiError) -> str:
