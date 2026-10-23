@@ -21,6 +21,7 @@ from typing import NoReturn
 import httpx
 import typer
 from pyatlassdk import AtlasApiError
+from pymongo.errors import PyMongoError
 from rich.markup import escape
 
 from sie_atlas_ops import __version__
@@ -42,6 +43,12 @@ from sie_atlas_ops.env import load_env
 from sie_atlas_ops.errors import AtlasOperationError, OpsError
 from sie_atlas_ops.index_definitions import CollectionIndexes, load_index_definitions
 from sie_atlas_ops.log import configure_logging
+from sie_atlas_ops.mongo import (
+    MissingNamespace,
+    build_authenticated_uri,
+    create_client,
+    find_missing_namespaces,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -113,7 +120,8 @@ def index(
     resolved from the argument, the environment, or an interactive prompt; the
     cluster is looked up inside that project, and one of its connection strings
     is selected interactively. A cluster-scoped temporary database user is then
-    created and expires after six hours. Creating the indexes is not
+    created and expires after six hours. Finally, missing databases and
+    collections are reported and confirmed. Creating the indexes is not
     implemented yet.
     """
     try:
@@ -148,10 +156,22 @@ def index(
                 escape(temporary_user.username),
                 _format_utc(temporary_user.delete_after),
             )
+
+        missing = _check_namespaces(selected, temporary_user, definitions)
+        if missing:
+            _report_missing(missing)
+            if not typer.confirm(
+                "Continue and let MongoDB create the missing databases/collections?",
+                default=False,
+            ):
+                typer.echo("Aborted.")
+                raise typer.Exit(code=1)
     except OpsError as exc:
         _fail(str(exc))
     except AtlasApiError as exc:
         _fail(describe_atlas_error(exc))
+    except PyMongoError as exc:
+        _fail(f"MongoDB request failed: {exc}")
     except httpx.HTTPError as exc:
         _fail(f"Could not reach the Atlas API: {exc}")
 
@@ -196,6 +216,39 @@ def _resolve_references(project: str | None, cluster: str | None) -> tuple[str, 
             f"Invalid project ID {project_ref!r}: expected 24 hexadecimal characters."
         )
     return project_ref, cluster_ref
+
+
+def _check_namespaces(
+    selected: ConnectionOption,
+    temporary_user: TemporaryUser,
+    definitions: list[CollectionIndexes],
+) -> list[MissingNamespace]:
+    try:
+        uri = build_authenticated_uri(
+            selected.uri, temporary_user.username, temporary_user.password
+        )
+    except ValueError as exc:
+        raise AtlasOperationError(str(exc)) from exc
+
+    mongo_client = create_client(uri)
+    try:
+        return find_missing_namespaces(mongo_client, definitions)
+    finally:
+        mongo_client.close()
+
+
+def _report_missing(missing: list[MissingNamespace]) -> None:
+    for item in missing:
+        database = escape(item.database)
+        collection = escape(item.collection)
+        if item.database_exists:
+            logger.warning('Collection "%s.%s" does not exist.', database, collection)
+        else:
+            logger.warning(
+                'Database "%s" does not exist (collection "%s" would be created).',
+                database,
+                collection,
+            )
 
 
 def _prompt_project() -> str:

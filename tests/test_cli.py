@@ -6,11 +6,13 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from urllib.parse import quote
 
 import pytest
 from pyatlassdk import AtlasApiError
 from pyatlassdk.models.cloud_database_user import CloudDatabaseUser
 from pyatlassdk.models.cluster_description20240805 import ClusterDescription20240805
+from pymongo.errors import PyMongoError
 from typer.testing import CliRunner
 
 from sie_atlas_ops import __version__
@@ -71,6 +73,43 @@ def _detail(**connection_strings: str) -> ClusterDescription20240805:
     return ClusterDescription20240805.model_validate(
         {"name": "cluster0", "connectionStrings": connection_strings}
     )
+
+
+class FakeMongoDatabase:
+    def __init__(self, collections: list[str]) -> None:
+        self._collections = collections
+
+    def list_collection_names(self) -> list[str]:
+        return list(self._collections)
+
+
+class FakeMongoClient:
+    def __init__(self, databases: dict[str, list[str]]) -> None:
+        self._databases = databases
+        self.closed = False
+
+    def list_database_names(self) -> list[str]:
+        return list(self._databases)
+
+    def __getitem__(self, database: str) -> FakeMongoDatabase:
+        return FakeMongoDatabase(self._databases.get(database, []))
+
+    def close(self) -> None:
+        self.closed = True
+
+
+@pytest.fixture(autouse=True)
+def mongo(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
+    """Replace the MongoDB client with one where exampleDB.example exists."""
+    client = FakeMongoClient({"exampleDB": ["example"]})
+    uris: list[str] = []
+
+    def factory(uri: str) -> FakeMongoClient:
+        uris.append(uri)
+        return client
+
+    monkeypatch.setattr("sie_atlas_ops.cli.create_client", factory)
+    return SimpleNamespace(client=client, uris=uris)
 
 
 def _write_definitions(directory: Path, name: str = "indexes.json") -> Path:
@@ -174,6 +213,89 @@ def test_index_creates_temporary_user(tmp_path: Path, monkeypatch: pytest.Monkey
     assert f"Temporary user: {payload['username']}" in result.output
     assert f"Password:       {payload['password']}" in result.output
     assert "Expires:" in result.output
+
+
+def test_index_prompts_when_collection_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_definitions(tmp_path)
+    client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail(standard="mongodb://only"))
+    _patch_client(monkeypatch, client)
+    missing_client = FakeMongoClient({"exampleDB": []})
+    monkeypatch.setattr("sie_atlas_ops.cli.create_client", lambda uri: missing_client)
+
+    result = runner.invoke(app, ["index", str(tmp_path), GROUP_A.id, "cluster0"], input="y\n")
+
+    assert result.exit_code == 0, result.output
+    assert 'Collection "exampleDB.example" does not exist.' in result.output
+    assert "Continue and let MongoDB create" in result.output
+    assert "Index creation is not implemented" in result.output
+
+
+def test_index_prompts_when_database_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_definitions(tmp_path)
+    client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail(standard="mongodb://only"))
+    _patch_client(monkeypatch, client)
+    missing_client = FakeMongoClient({})
+    monkeypatch.setattr("sie_atlas_ops.cli.create_client", lambda uri: missing_client)
+
+    result = runner.invoke(app, ["index", str(tmp_path), GROUP_A.id, "cluster0"], input="y\n")
+
+    assert result.exit_code == 0, result.output
+    assert 'Database "exampleDB" does not exist' in result.output
+    assert "Continue and let MongoDB create" in result.output
+
+
+def test_index_aborts_when_missing_namespace_declined(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_definitions(tmp_path)
+    client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail(standard="mongodb://only"))
+    _patch_client(monkeypatch, client)
+    missing_client = FakeMongoClient({"exampleDB": []})
+    monkeypatch.setattr("sie_atlas_ops.cli.create_client", lambda uri: missing_client)
+
+    result = runner.invoke(app, ["index", str(tmp_path), GROUP_A.id, "cluster0"], input="n\n")
+
+    assert result.exit_code == 1
+    assert "Aborted." in result.output
+    assert "Index creation is not implemented" not in result.output
+
+
+def test_index_connects_with_temporary_credentials(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mongo: SimpleNamespace
+) -> None:
+    _write_definitions(tmp_path)
+    client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail(standard="mongodb://only"))
+    _patch_client(monkeypatch, client)
+
+    result = runner.invoke(app, ["index", str(tmp_path), GROUP_A.id, "cluster0"])
+
+    assert result.exit_code == 0, result.output
+    payload = client.created_user_payload
+    assert payload is not None
+    assert len(mongo.uris) == 1
+    credentials = f"{quote(payload['username'], safe='')}:{quote(payload['password'], safe='')}"
+    assert f"{credentials}@" in mongo.uris[0]
+    assert "authSource=admin" in mongo.uris[0]
+
+
+def test_index_reports_mongo_errors(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _write_definitions(tmp_path)
+    client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail(standard="mongodb://only"))
+    _patch_client(monkeypatch, client)
+
+    def factory(uri: str) -> FakeMongoClient:
+        raise PyMongoError("boom")
+
+    monkeypatch.setattr("sie_atlas_ops.cli.create_client", factory)
+
+    result = runner.invoke(app, ["index", str(tmp_path), GROUP_A.id, "cluster0"])
+
+    assert result.exit_code == 1
+    assert "MongoDB request failed: boom" in result.output
 
 
 def test_index_accepts_cluster_id(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -101,10 +101,14 @@ JSON 格式：
    awsPrivateLink / privateEndpoint）；多个时提示选择
 6. 创建临时数据库用户：角色 `readWriteAnyDatabase`，通过 `scopes` 限定到当前集群，
    `deleteAfterDate` 设为 6 小时后由 Atlas 自动删除
-7. 输出集群、项目、临时用户凭据和已加载的索引定义摘要
+7. 用临时用户连接 MongoDB，检查每个定义文件中 `database` / `collection` 是否存在；
+   缺失的库或集合会逐条列出，并询问是否继续（默认不继续）
+8. 输出集群、项目、临时用户凭据和已加载的索引定义摘要
 
-命令在创建临时用户后结束，索引创建本身尚未实现。创建数据库用户需要 Atlas API Key
+命令在存在性检查后结束，索引创建本身尚未实现。创建数据库用户需要 Atlas API Key
 具备相应权限（例如 Project Owner 或 Project Database Access Admin）。
+
+如果确认继续，MongoDB 会在创建索引时隐式创建缺失的库和集合；选择中止则退出码为 1。
 
 摘要中的临时用户凭据只写到 stdout，不会进入日志：
 
@@ -182,6 +186,7 @@ source .venv/bin/activate
 │       ├── atlas.py                  # 凭据、集群查找、连接串
 │       ├── env.py                    # .env 加载（向上查找，不覆盖已有变量）
 │       ├── index_definitions.py      # 索引定义 JSON 的加载与校验
+│       ├── mongo.py                  # MongoDB 连接、认证 URI、库/集合检查
 │       ├── log.py                    # 日志配置（RichHandler，stderr）
 │       └── errors.py                 # 面向用户的错误类型
 └── tests/
@@ -190,7 +195,8 @@ source .venv/bin/activate
     ├── test_atlas.py                 # Atlas 辅助逻辑测试
     ├── test_env.py                   # .env 加载测试
     ├── test_index_definitions.py     # 定义文件校验测试
-    └── test_log.py                   # 颜色/日志配置测试
+    ├── test_log.py                   # 颜色/日志配置测试
+    └── test_mongo.py                 # MongoDB URI 与存在性检查测试
 ```
 
 ## 依赖说明
