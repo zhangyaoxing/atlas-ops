@@ -178,8 +178,19 @@ MongoDB 后直接进入导出模式，然后清理临时用户并输出导出摘
 - 只有 `_id_` 索引的集合不生成文件
 - `options` 保留 `name`、`unique` 等，去掉服务端字段 `v`、`key`、`ns`
 - 导出文件可以直接作为默认模式的输入目录重新使用
+- 结束时输出按集合统计的表格，列出每个集合导出的索引数和合计：
 
-默认模式在创建/删除索引后结束；导出模式在写文件后结束。创建临时数据库用户需要
+```text
+Export summary (2 collection(s) from /path/to/exported-indexes):
+Collection        Exported
+----------------  --------
+exampleDB.orders         1
+exampleDB.users          2
+----------------  --------
+Total                    3
+```
+
+默认模式在创建/删除索引后结束；导出模式在写文件并输出摘要后结束。创建临时数据库用户需要
 Atlas API Key 具备相应权限（例如 Project Owner 或 Project Database Access Admin）。
 
 比较 options 时会排除服务端字段 `v`、`key`；如果定义里没有写 `name`，已有索引的自动生成名也不会参与比较。

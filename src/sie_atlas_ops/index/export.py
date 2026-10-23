@@ -16,11 +16,21 @@ _UNSAFE_FILENAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 
 @dataclass(frozen=True, slots=True)
+class ExportedCollection:
+    """One collection written during an export."""
+
+    database: str
+    collection: str
+    indexes: int
+
+
+@dataclass(frozen=True, slots=True)
 class ExportResult:
-    """Number of collection files and indexes written."""
+    """Collection files and indexes written during an export."""
 
     files: int
     indexes: int
+    collections: tuple[ExportedCollection, ...]
 
 
 def export_indexes(client: MongoClientLike, directory: Path) -> ExportResult:
@@ -33,6 +43,7 @@ def export_indexes(client: MongoClientLike, directory: Path) -> ExportResult:
     directory.mkdir(parents=True, exist_ok=True)
     files = 0
     indexes = 0
+    exported: list[ExportedCollection] = []
 
     for database in sorted(client.list_database_names()):
         if database in _SYSTEM_DATABASES:
@@ -64,8 +75,19 @@ def export_indexes(client: MongoClientLike, directory: Path) -> ExportResult:
             )
             files += 1
             indexes += len(definitions)
+            exported.append(
+                ExportedCollection(
+                    database=database,
+                    collection=collection,
+                    indexes=len(definitions),
+                )
+            )
 
-    return ExportResult(files=files, indexes=indexes)
+    return ExportResult(
+        files=files,
+        indexes=indexes,
+        collections=tuple(exported),
+    )
 
 
 def _definitions(indexes: Any) -> list[dict[str, Any]]:

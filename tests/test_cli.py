@@ -641,6 +641,9 @@ def test_index_export_writes_files_without_mutating_indexes(
         }
     ]
     assert mongo_client.commands == []
+    assert "Export summary (1 collection(s)" in result.output
+    assert re.search(r"^exampleDB\.example[ \t]+1$", result.output, re.MULTILINE)
+    assert re.search(r"^Total[ \t]+1$", result.output, re.MULTILINE)
     assert "Exported 1 index(es) from 1 collection(s)" in result.output
     assert "Index creation complete" not in result.output
     assert client.created_user_payload is not None

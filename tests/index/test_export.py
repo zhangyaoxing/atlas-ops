@@ -5,7 +5,11 @@ from pathlib import Path
 from typing import Any
 
 from sie_atlas_ops.index.definitions import load_index_definitions
-from sie_atlas_ops.index.export import ExportResult, export_indexes
+from sie_atlas_ops.index.export import (
+    ExportedCollection,
+    ExportResult,
+    export_indexes,
+)
 
 
 class FakeCollection:
@@ -59,6 +63,7 @@ def test_export_writes_one_file_per_collection(tmp_path: Path) -> None:
                     ]
                 },
                 "empty": {"indexes": [{"v": 2, "key": {"_id": 1}, "name": "_id_"}]},
+                "orders": {"indexes": [{"v": 2, "key": {"createdAt": 1}, "name": "createdAt_1"}]},
                 "system.js": {"indexes": [{"v": 2, "key": {"_id": 1}, "name": "_id_"}]},
                 "usersView": {"type": "view", "indexes": []},
             },
@@ -67,7 +72,15 @@ def test_export_writes_one_file_per_collection(tmp_path: Path) -> None:
 
     result = export_indexes(client, tmp_path)
 
-    assert result == ExportResult(files=1, indexes=2)
+    assert result == ExportResult(
+        files=2,
+        indexes=3,
+        collections=(
+            ExportedCollection(database="shop", collection="orders", indexes=1),
+            ExportedCollection(database="shop", collection="users", indexes=2),
+        ),
+    )
+    assert (tmp_path / "shop.orders.json").exists()
     payload = json.loads((tmp_path / "shop.users.json").read_text(encoding="utf-8"))
     assert payload["database"] == "shop"
     assert payload["collection"] == "users"
@@ -97,7 +110,7 @@ def test_export_skips_collections_without_user_indexes(tmp_path: Path) -> None:
         {"db": {"empty": {"indexes": [{"v": 2, "key": {"_id": 1}, "name": "_id_"}]}}}
     )
 
-    assert export_indexes(client, tmp_path) == ExportResult(files=0, indexes=0)
+    assert export_indexes(client, tmp_path) == ExportResult(files=0, indexes=0, collections=())
     assert list(tmp_path.iterdir()) == []
 
 
