@@ -1,0 +1,15 @@
+{
+  "database": "sample_mflix",
+  "collection": "users",
+  "indexes": [
+    {
+      "keys": {
+        "email": 1.0
+      },
+      "options": {
+        "name": "email_1",
+        "unique": true
+      }
+    }
+  ]
+}

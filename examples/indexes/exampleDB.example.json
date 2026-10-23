@@ -4,18 +4,19 @@
   "indexes": [
     {
       "keys": {
-        "field": 1
+        "field": 1,
+        "field_2": 1
       },
       "options": {
-        "name": "field_index_1",
-        "unique": true
-      },
-      "commitQuorum": 1
+        "name": "field_1_field_2_1"
+      }
     },
     {
       "keys": {
-        "field": 1,
-        "field_2": 1
+        "field": 1
+      },
+      "options": {
+        "name": "field_index"
       }
     }
   ]

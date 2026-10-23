@@ -1,0 +1,15 @@
+{
+  "database": "sample_mflix",
+  "collection": "theaters",
+  "indexes": [
+    {
+      "keys": {
+        "location.geo": "2dsphere"
+      },
+      "options": {
+        "name": "geo index",
+        "2dsphereIndexVersion": 3
+      }
+    }
+  ]
+}

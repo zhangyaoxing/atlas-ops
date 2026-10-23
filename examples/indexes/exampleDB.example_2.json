@@ -7,9 +7,9 @@
         "field": 1
       },
       "options": {
+        "name": "field_1",
         "expireAfterSeconds": 3600
-      },
-      "commitQuorum": 1
+      }
     }
   ]
 }
