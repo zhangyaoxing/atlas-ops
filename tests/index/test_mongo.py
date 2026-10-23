@@ -62,6 +62,22 @@ def test_build_authenticated_uri_adds_auth_source_without_query() -> None:
     assert uri == "mongodb://user:password@host:27017?authSource=admin"
 
 
+def test_build_authenticated_uri_supports_multiple_hosts() -> None:
+    uri = build_authenticated_uri(
+        "mongodb://shard-00-00.example.net:27017,"
+        "shard-00-01.example.net:27017,"
+        "shard-00-02.example.net:27017/?replicaSet=atlas-abc",
+        "user",
+        "p@ss",
+    )
+
+    assert uri == (
+        "mongodb://user:p%40ss@shard-00-00.example.net:27017,"
+        "shard-00-01.example.net:27017,"
+        "shard-00-02.example.net:27017/?replicaSet=atlas-abc&authSource=admin"
+    )
+
+
 def test_build_authenticated_uri_replaces_existing_credentials() -> None:
     uri = build_authenticated_uri("mongodb://old:secret@host/exampleDB", "user", "password")
 

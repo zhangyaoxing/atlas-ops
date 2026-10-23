@@ -40,15 +40,19 @@ class MissingNamespace:
 
 
 def build_authenticated_uri(uri: str, username: str, password: str) -> str:
-    """Insert credentials into an Atlas URI, forcing ``authSource=admin``."""
+    """Insert credentials into an Atlas URI, forcing ``authSource=admin``.
+
+    Standard Atlas URIs list several comma-separated hosts, so only ``netloc``
+    is rewritten. Parsing host and port separately would reject those URIs.
+    """
     parts = urlsplit(uri)
-    if not parts.hostname:
+    if not parts.netloc:
         raise ValueError(f"Invalid MongoDB URI: {uri!r}")
-    host = f"[{parts.hostname}]" if ":" in parts.hostname else parts.hostname
-    netloc = f"{quote(username, safe='')}:{quote(password, safe='')}@{host}"
-    if parts.port:
-        netloc = f"{netloc}:{parts.port}"
-    authenticated = urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+    netloc = parts.netloc.rsplit("@", 1)[-1]
+    credentials = f"{quote(username, safe='')}:{quote(password, safe='')}"
+    authenticated = urlunsplit(
+        (parts.scheme, f"{credentials}@{netloc}", parts.path, parts.query, parts.fragment)
+    )
     if "authSource=" not in authenticated:
         separator = "&" if "?" in authenticated else "?"
         authenticated = f"{authenticated}{separator}authSource=admin"
