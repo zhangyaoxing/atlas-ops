@@ -1,99 +1,118 @@
 # sie-atlas-ops
 
-SIE Atlas 运维命令行工具（CLI）。
+Command-line tool for SIE Atlas operations.
 
-## 环境要求
+## Requirements
 
 - [uv](https://docs.astral.sh/uv/)
-- Python 3.10（由 uv 按 `.python-version` 自动选用）
+- Python 3.10 (selected automatically by uv from `.python-version`)
 
-## 快速开始
+## Quick start
 
 ```bash
-# 创建 .venv 并安装运行 + 开发依赖
+# Create .venv and install runtime + development dependencies
 uv sync
 
-# 运行 CLI
+# Run the CLI
 uv run sie-atlas-ops --help
 ```
 
-## 配置
+## Configuration
 
-Atlas API 凭据放在 `.env` 中（Atlas Organization Access Manager 中的 API Key）：
+Put Atlas API credentials in `.env` (an API key from the Atlas Organization Access
+Manager):
 
 ```bash
 cp .env.example .env
-# 编辑 .env，填入 ATLAS_PUBLIC_KEY / ATLAS_PRIVATE_KEY
+# Edit .env and set ATLAS_PUBLIC_KEY / ATLAS_PRIVATE_KEY
 ```
 
-还可以在 `.env` 里预置 `ATLAS_PROJECT_ID` 和 `ATLAS_CLUSTER_NAME`，对应选项省略时会使用它们。
+You can also preset `ATLAS_PROJECT_ID` and `ATLAS_CLUSTER_NAME` in `.env`; they are
+used when the corresponding options are omitted.
 
-如果不想让工具创建临时数据库用户，可以提供已有用户的 `ATLAS_DB_USERNAME` / `ATLAS_DB_PASSWORD`（或命令行参数 `--db-username` / `--db-password`）。两者必须同时提供；只提供一个会报错。密码写在命令行会进入 shell 历史，建议放在 `.env` 中。
+To avoid creating a temporary database user, provide an existing user through
+`ATLAS_DB_USERNAME` / `ATLAS_DB_PASSWORD` (or `--db-username` / `--db-password`).
+Both values are required; providing only one is an error. Passwords passed on the
+command line end up in shell history, so prefer `.env` or environment variables.
 
-工具启动时会从当前工作目录向上查找最近的 `.env` 并加载。已经通过 shell 导出的变量优先于文件内容，因此临时覆盖可以这样写：
+At startup the tool searches upward from the current working directory for the
+nearest `.env` and loads it. Variables already exported in the shell take precedence
+over file values, so a temporary override can look like this:
 
 ```bash
 ATLAS_PUBLIC_KEY=... ATLAS_PRIVATE_KEY=... uv run sie-atlas-ops index ./examples/indexes \
   --project-id 64f1a2b3c4d5e6f7a8b9c0d1 --cluster cluster0
 ```
 
-`.env` 已被 git 忽略，不会误提交凭据。也可以完全不使用 `.env`，直接 `export` 相应变量。
+`.env` is ignored by git, so credentials are not committed accidentally. You can
+also skip `.env` entirely and export the variables directly.
 
-## 命令
+## Commands
 
 ### `index`
 
-读取目录下每个 JSON 文件（一个文件描述一个集合的索引），在指定 project 内按集群 ID
-或名称定位集群，再从该集群的连接串中选择一个使用。
+Read every JSON file in a directory (one file per collection), locate the cluster by
+ID or name within the specified project, and select one of its connection strings.
 
-默认模式会创建缺失的索引，并找出定义中不存在的已有索引，逐条列出并询问是否删除；
-确认后会在创建完成后执行删除。使用 `--export/-e` 时，`DIRECTORY` 变为输出目录：
-不读取定义，也不创建或删除索引，而是把数据库中所有集合的索引定义导出为 JSON 文件。
+The default mode creates missing indexes, finds existing indexes that are not
+present in the definitions, lists them, and asks whether to delete them. Confirmed
+deletions run after index creation. With `--export/-e`, `DIRECTORY` becomes an output
+directory: definitions are not read, no index is created or deleted, and the index
+definitions of every collection in the database are exported as JSON files.
 
 ```bash
-# 项目 ID + 集群名
+# Project ID + cluster name
 uv run sie-atlas-ops index ./examples/indexes \
   --project-id 64f1a2b3c4d5e6f7a8b9c0d1 --cluster cluster0
 
-# 同样的参数可以用短选项
+# The same options in short form
 uv run sie-atlas-ops index ./examples/indexes \
   -g 64f1a2b3c4d5e6f7a8b9c0d1 -c cluster0
 
-# 集群 ID 也可以（24 位十六进制）
+# A cluster ID (24 hexadecimal characters) also works
 uv run sie-atlas-ops index ./examples/indexes \
   --project-id 64f1a2b3c4d5e6f7a8b9c0d1 --cluster b1c2d3e4f5a6b7c8d9e0f1a2
 
-# 从 .env / 环境变量读取 project 和 cluster
+# Read project and cluster from .env / environment variables
 uv run sie-atlas-ops index ./examples/indexes
 
-# 使用已有数据库用户，跳过临时用户的创建、等待和删除
+# Use an existing database user and skip temporary-user create/wait/delete
 uv run sie-atlas-ops index ./examples/indexes \
   --project-id 64f1a2b3c4d5e6f7a8b9c0d1 --cluster cluster0 \
   --db-username appUser --db-password '...'
 
-# 导出所有集合的索引定义到目录（不创建/删除索引）
+# Export every collection's index definitions to a directory (no create/delete)
 uv run sie-atlas-ops index ./exported-indexes \
   --project-id 64f1a2b3c4d5e6f7a8b9c0d1 --cluster cluster0 --export
 ```
 
-参数：
+Arguments:
 
-- `DIRECTORY`：默认模式下存放 `*.json` 定义的输入目录；`--export` 模式下为输出目录
-  （需要已存在，不递归子目录）
+- `DIRECTORY`: input directory containing `*.json` definitions in the default mode;
+  output directory with `--export` mode (must already exist, not recursive)
 
-选项：
+Options:
 
-- `-g, --project-id`：project ID（24 位十六进制）；省略时依次取 `ATLAS_PROJECT_ID`、交互输入
-- `-c, --cluster`：集群 ID 或名称；省略时依次取 `ATLAS_CLUSTER_NAME`、交互输入
-- `-e, --export`：导出模式，不执行任何索引创建或删除
-- `-u, --db-username` / `-p, --db-password`：已有数据库用户；也可以使用 `ATLAS_DB_USERNAME` / `ATLAS_DB_PASSWORD`。两者必须同时提供，提供后不会创建或删除临时用户
-- 密码走命令行会进入 shell 历史，建议放在 `.env` 或使用环境变量
+- `-g, --project-id`: project ID (24 hexadecimal characters); falls back to
+  `ATLAS_PROJECT_ID`, then prompts
+- `-c, --cluster`: cluster ID or name; falls back to `ATLAS_CLUSTER_NAME`, then prompts
+- `-e, --export`: export mode; does not create or delete any index
+- `-u, --db-username` / `-p, --db-password`: existing database user; can also use
+  `ATLAS_DB_USERNAME` / `ATLAS_DB_PASSWORD`. Both must be provided together. When
+  supplied, no temporary user is created or deleted
+- Passwords on the command line end up in shell history; prefer `.env` or environment
+  variables
 
-集群名称先精确匹配，再尝试不区分大小写，且只在指定 project 内查找。
+Cluster names are matched exactly first, then case-insensitively, and only within the
+specified project.
 
-连接串字段可能是字符串、列表或字典：字符串直接作为选项，列表逐项展开，字典逐值展开（嵌套结构递归展开）；只接受以 `mongodb://` 或 `mongodb+srv://` 开头的值，最终每个连接串作为一个选项供选择。
+Connection string fields can be strings, lists, or dictionaries. Strings are used
+directly, lists are expanded item by item, and dictionaries are expanded value by
+value (nested structures are expanded recursively). Only values starting with
+`mongodb://` or `mongodb+srv://` are accepted. Every resulting connection string is
+offered as a separate option.
 
-JSON 格式：
+JSON format:
 
 ```json
 {
@@ -109,47 +128,58 @@ JSON 格式：
 }
 ```
 
-规则：
+Rules:
 
-- `database`、`collection`、`indexes` 必填；`indexes` 不能为空数组
-- 每个索引的 `keys` 必填；`options`、`commitQuorum` 可选
-- `keys` 的数值方向支持 `1` / `-1`，也接受小数形式 `1.0` / `-1.0`；其他数值会被拒绝
-- `keys` 的值也可以是字符串索引类型（如 `text`、`hashed`）
-- 未知字段会被拒绝，便于尽早发现拼写错误
-- 多个文件的校验错误会一次性全部报告
+- `database`, `collection`, and `indexes` are required; `indexes` must not be empty
+- `keys` is required for every index; `options` and `commitQuorum` are optional
+- Numeric `keys` directions support `1` / `-1` and the decimal forms `1.0` / `-1.0`;
+  other numbers are rejected
+- `keys` values can also be string index types such as `text` and `hashed`
+- Unknown fields are rejected to catch typos early
+- Validation errors from multiple files are reported together
 
-执行流程：
+Execution flow:
 
-1. 读取并校验目录下所有 JSON 文件（`--export` 模式跳过）
-2. 加载最近的 `.env`，再读取 Atlas API 凭据（shell 变量优先）
-3. 解析 project：`--project-id` → `ATLAS_PROJECT_ID` → 交互输入（校验 24 位十六进制）
-4. 解析集群：`--cluster` → `ATLAS_CLUSTER_NAME` → 交互输入；在指定 project 内按 ID
-   或名称查找，多个同名集群时提示选择
-5. 拉取集群详情并列出全部连接串（字符串、列表、字典会自动展开为独立选项；
-   如 standard / standardSrv / private / privateSrv / awsPrivateLink / privateEndpoint）；
-   多个时提示选择
-6. 数据库用户：如果提供了 `--db-username` / `--db-password` 或对应环境变量，
-   直接使用该用户；否则创建临时用户（`readWriteAnyDatabase`，`scopes` 限定到当前
-   集群，`deleteAfterDate` 设为 6 小时后）
-7. 仅临时用户需要等待生效：用新凭据轮询需要认证的 `listDatabases`，认证失败
-   （错误码 13/18）时每 2 秒重试，最多等待 120 秒
-8. 用数据库用户连接 MongoDB，检查每个定义文件中 `database` / `collection` 是否存在；
-   缺失的库或集合会逐条列出，并询问是否继续（默认不继续）
-9. 按 `keys` 的有序字段组合（不看索引名）匹配已有索引：
-   - `options` 完全一致 → 输出一条 INFO 并跳过
-   - `options` 不一致 → 输出 WARNING（含已有索引名和双方 options）并跳过
-10. 找出定义中不存在的已有索引（同样按 `keys` 匹配，`_id_` 永远排除），逐条列出并
-    询问是否删除（默认不删除）
-11. 对需要创建的索引执行 `createIndexes`：按 `(database, collection, commitQuorum)`
-    分批，每批发一条命令；索引名取 options 里的 `name`，没有则按 MongoDB 规则生成
-    （如 `a_1_b_-1`）；`commitQuorum` 放在命令级
-12. 如果用户确认删除，在索引创建完成后逐条执行 `dropIndexes`
-13. 仅临时用户：无论正常结束、报错还是中止，退出前都调用 Atlas API 删除（只发送
-    DELETE，不等待 MongoDB 侧生效；删除失败只记录 WARNING）
-14. 输出集群、项目、连接串，以及按集合统计的 Created / Skipped / Deleted 文字表格；
-    Skipped 包含 identical 和 options 不一致而跳过的索引
+1. Read and validate every JSON file in the directory (skipped with `--export`)
+2. Load the nearest `.env`, then read Atlas API credentials (shell variables win)
+3. Resolve the project: `--project-id` → `ATLAS_PROJECT_ID` → interactive prompt
+   (validated as 24 hexadecimal characters)
+4. Resolve the cluster: `--cluster` → `ATLAS_CLUSTER_NAME` → interactive prompt; look
+   it up by ID or name in the project, and prompt when multiple clusters share a name
+5. Fetch cluster details and list all connection strings (strings, lists, and
+   dictionaries are expanded into separate options; for example `standard`,
+   `standardSrv`, `private`, `privateSrv`, `awsPrivateLink`, `privateEndpoint`);
+   prompt when there is more than one
+6. Database user: if `--db-username` / `--db-password` or the corresponding
+   environment variables are provided, use that user; otherwise create a temporary
+   user (`readWriteAnyDatabase`, scoped to the current cluster, with
+   `deleteAfterDate` set to six hours from now)
+7. Only a temporary user needs to wait for activation: poll authenticated
+   `listDatabases` with the new credentials, retrying every two seconds on
+   authentication failures (error codes 13/18) for up to 120 seconds
+8. Connect to MongoDB with the database user and check whether each definition's
+   `database` / `collection` exists; list missing databases or collections and ask
+   whether to continue (default: no)
+9. Match existing indexes by their ordered `keys` pattern (never by name):
+   - `options` match exactly → log one INFO and skip
+   - `options` differ → log a WARNING (with the existing name and both option sets)
+     and skip
+10. Find existing indexes that are not present in the definitions (again by `keys`;
+    `_id_` is always excluded), list them, and ask whether to delete them (default: no)
+11. Run `createIndexes` for indexes that need creating, grouped by
+    `(database, collection, commitQuorum)` with one command per group; the index name
+    comes from `options.name`, or is generated using MongoDB rules (for example
+    `a_1_b_-1`); `commitQuorum` is set at the command level
+12. If deletion was confirmed, run `dropIndexes` for each extra index after index
+    creation finishes
+13. Temporary user only: delete it through the Atlas API on normal exit, error, or
+    abort (send DELETE without waiting for MongoDB-side activation; deletion failures
+    only log a WARNING)
+14. Print the cluster, project, connection string, and a per-collection text table of
+    Created / Skipped / Deleted; Skipped includes identical indexes and indexes
+    skipped because their options conflict
 
-默认模式结束时输出类似：
+The default mode ends with output like this:
 
 ```text
 Index summary (2 collection(s) from /path/to/definitions):
@@ -162,23 +192,30 @@ Total                1        2        1
 Skipped = identical or options-conflict indexes.
 ```
 
-使用 `--export` 时，步骤 1（读取定义）和步骤 8–14（应用/删除索引）不会执行；连接
-MongoDB 后直接进入导出模式，然后清理临时用户并输出导出摘要。
+With `--export`, steps 1 (read definitions) and 8–14 (apply/delete indexes) are
+skipped. After connecting to MongoDB, the tool enters export mode, cleans up the
+temporary user, and prints the export summary.
 
-### 导出模式
+#### Export mode
 
-`--export/-e` 把 `DIRECTORY` 当作输出目录，逐集合写出索引定义：
+`--export/-e` treats `DIRECTORY` as an output directory and writes index definitions
+collection by collection:
 
-- 不执行任何 `createIndexes` / `dropIndexes`
-- 仍然执行 project/cluster、连接串、临时用户创建与等待流程；退出时照常删除临时用户
-- 遍历所有数据库，跳过 `admin`、`local`、`config` 系统库
-- 跳过 `system.*` 集合和 view
-- 每个存在非 `_id_` 索引的集合生成一个 `<database>.<collection>.json`
-- 文件名中的 `/`、`\`、`:` 等不安全字符替换为 `_`
-- 只有 `_id_` 索引的集合不生成文件
-- `options` 保留 `name`、`unique` 等，去掉服务端字段 `v`、`key`、`ns`
-- 导出文件可以直接作为默认模式的输入目录重新使用
-- 结束时输出按集合统计的表格，列出每个集合导出的索引数和合计：
+- No `createIndexes` / `dropIndexes` is executed
+- The project/cluster, connection-string, and temporary-user create/wait flow still
+  runs; the temporary user is deleted on exit as usual
+- Every database is scanned, excluding the `admin`, `local`, and `config` system
+  databases
+- `system.*` collections and views are skipped
+- Every collection with at least one non-`_id_` index produces one
+  `<database>.<collection>.json` file
+- Unsafe filename characters such as `/`, `\`, and `:` are replaced with `_`
+- Collections with only the `_id_` index produce no file
+- `options` keeps `name`, `unique`, and other user options while removing the
+  server-managed fields `v`, `key`, and `ns`
+- Exported files can be used directly as the input directory for the default mode
+- The run ends with a per-collection table showing the number of exported indexes and
+  the total:
 
 ```text
 Export summary (2 collection(s) from /path/to/exported-indexes):
@@ -190,24 +227,32 @@ exampleDB.users          2
 Total                    3
 ```
 
-默认模式在创建/删除索引后结束；导出模式在写文件并输出摘要后结束。创建临时数据库用户需要
-Atlas API Key 具备相应权限（例如 Project Owner 或 Project Database Access Admin）。
+The default mode ends after creating/deleting indexes; export mode ends after writing
+files and printing the summary. Creating a temporary database user requires an Atlas
+API key with sufficient permissions (for example Project Owner or Project Database
+Access Admin).
 
-比较 options 时会排除服务端字段 `v`、`key`；如果定义里没有写 `name`，已有索引的自动生成名也不会参与比较。
+When comparing options, the server-managed fields `v` and `key` are excluded. If a
+definition does not specify `name`, the existing index's generated name is ignored
+during comparison as well.
 
-如果确认继续，MongoDB 会在创建索引时隐式创建缺失的库和集合；选择中止则退出码为 1（仅默认模式）。
+If you confirm continuation, MongoDB creates missing databases and collections
+implicitly during index creation; aborting exits with code 1 (default mode only).
 
-临时用户的凭据只在运行期间存在，不再输出到摘要。`deleteAfterDate` 的 6 小时过期仍作为兜底，防止进程被强杀时用户永久残留。提供自有数据库凭据时不会创建临时用户，也不会执行删除。
+Temporary-user credentials exist only for the duration of the run and are never
+printed in the summary. The six-hour `deleteAfterDate` remains as a fallback in case
+the process is killed. When existing database credentials are supplied, no temporary
+user is created or deleted.
 
-## 日志
+## Logging
 
-## 日志
+Logs use the standard-library `logging` module with
+`rich.logging.RichHandler` (Rich is installed with Typer, so no extra dependency is
+needed). Logs go to stderr while stdout is reserved for command results, so
+redirection keeps the two streams separate. Rich colorizes output when the terminal
+supports it and honors `NO_COLOR` (`NO_COLOR=1` disables colors).
 
-## 日志
-
-执行日志使用标准库 `logging` + `rich.logging.RichHandler`（Rich 已随 Typer 安装，无需新增依赖）。日志写入 stderr，stdout 保留给命令结果，重定向时互不干扰。Rich 会在终端支持时着色，并遵循 `NO_COLOR`（设置为 `NO_COLOR=1` 即可关闭颜色）。
-
-所有日志为英文，默认级别 INFO。典型输出：
+All logs are in English and default to INFO level. Typical output:
 
 ```text
 12:00:00 INFO     Found cluster cluster0 (64f1…) by name in project Project Atlas (…)
@@ -217,93 +262,106 @@ Atlas API Key 具备相应权限（例如 Project Owner 或 Project Database Acc
          INFO     Selected connection string standard_srv: "mongodb+srv://…"
 ```
 
-集群名和项目名显示为绿色，连接串标签显示为青色，连接串本身用双引号包裹。
+Cluster and project names are green, connection-string labels are cyan, and
+connection strings themselves are wrapped in double quotes.
 
-## VS Code 调试
+## VS Code debugging
 
-仓库自带 `.vscode/` 配置。用 VS Code 打开项目后：
+The repository ships with a `.vscode/` configuration. After opening the project in
+VS Code:
 
-1. 安装推荐扩展（Python、Python Debugger、Pylance、Ruff）
-2. 解释器选择 `${workspaceFolder}/.venv/bin/python`（`settings.json` 已设默认）
-3. 在 Run and Debug 中选择配置：
+1. Install the recommended extensions (Python, Python Debugger, Pylance, Ruff)
+2. Select `${workspaceFolder}/.venv/bin/python` as the interpreter (`settings.json`
+   already sets this as the default)
+3. Choose a configuration under Run and Debug:
 
-- `index: interactive (env / prompts)`：使用 `examples/indexes`，project/cluster 从 `.env` 或环境变量读取，缺失时在集成终端里输入
-- `index: directory + project + cluster`：依次输入目录、project ID、cluster；project/cluster 留空则回退到环境变量/交互输入
-- `pytest: current file`：调试当前打开的测试文件
+- `index: interactive (env / prompts)`: uses `examples/indexes`; project/cluster come
+  from `.env` or environment variables, and are prompted for in the integrated
+  terminal when missing
+- `index: directory + project + cluster`: prompts for directory, project ID, and
+  cluster; blank project/cluster values fall back to environment variables or
+  interactive prompts
+- `pytest: current file`: debug the currently open test file
 - `version` / `help`
 
-所有配置都使用集成终端（`console: integratedTerminal`），CLI 的交互提示可以正常输入。断点直接打在 `src/sie_atlas_ops/` 下即可；默认 `justMyCode: true`，如需步入 `pyatlassdk` 内部，把它改成 `false`。
+All configurations use the integrated terminal (`console: integratedTerminal`), so
+interactive CLI prompts work normally. Set breakpoints directly under
+`src/sie_atlas_ops/`; `justMyCode: true` is the default. To step into `pyatlassdk`,
+set it to `false`.
 
-`.env` 由程序自身加载，因此调试时无需额外配置 envFile。
+`.env` is loaded by the program itself, so no extra `envFile` configuration is needed
+for debugging.
 
-## 开发
+## Development
 
 ```bash
-uv run pytest        # 跑测试
-uv run ruff check .  # 代码检查
-uv run ruff format . # 格式化
+uv run pytest        # run tests
+uv run ruff check .  # lint
+uv run ruff format . # format
 ```
 
-首次手动激活虚拟环境的写法：
+To activate the virtual environment manually the first time:
 
 ```bash
 source .venv/bin/activate
 ```
 
-## 项目结构
+## Project structure
 
-```
+```text
 .
-├── pyproject.toml                    # 项目元数据、依赖、工具配置
-├── .python-version                   # 固定 Python 3.10
-├── .env.example                      # 环境变量模板（复制为 .env）
-├── .vscode/                          # VS Code 调试、测试、格式化配置
-├── examples/indexes/example.json     # 索引定义示例
+├── pyproject.toml                    # project metadata, dependencies, tool config
+├── .python-version                   # pins Python 3.10
+├── .env.example                      # environment variable template (copy to .env)
+├── .vscode/                          # VS Code debug, test, and format config
+├── examples/indexes/example.json     # example index definition
 ├── src/
 │   └── sie_atlas_ops/
-│       ├── __init__.py               # 版本号
-│       ├── __main__.py               # python -m sie_atlas_ops 入口
-│       ├── cli.py                    # Typer 应用与命令定义
-│       ├── atlas.py                  # 凭据、集群查找、连接串
-│       ├── env.py                    # .env 加载（向上查找，不覆盖已有变量）
+│       ├── __init__.py               # version
+│       ├── __main__.py               # python -m sie_atlas_ops entry point
+│       ├── cli.py                    # Typer app and command definitions
+│       ├── atlas.py                  # credentials, cluster lookup, connection strings
+│       ├── env.py                    # .env loading (search upward, do not override)
 │       ├── index/
 │       │   ├── __init__.py
-│       │   ├── create.py             # createIndexes 分批创建
-│       │   ├── definitions.py        # 索引定义 JSON 的加载与校验
-│       │   ├── drop.py               # dropIndexes 删除未定义索引
-│       │   ├── export.py             # 按命名空间导出索引定义
-│       │   ├── mongo.py              # MongoDB 连接、认证 URI、库/集合检查
-│       │   └── plan.py               # 索引存在性/选项比较与未定义索引检测
-│       ├── log.py                    # 日志配置（RichHandler，stderr）
-│       └── errors.py                 # 面向用户的错误类型
+│       │   ├── create.py             # batched createIndexes
+│       │   ├── definitions.py        # load and validate index definition JSON
+│       │   ├── drop.py               # dropIndexes for undeclared indexes
+│       │   ├── export.py             # export index definitions by namespace
+│       │   ├── mongo.py              # MongoDB connection, auth URI, namespace checks
+│       │   └── plan.py               # index/option comparison and extra-index detection
+│       ├── log.py                    # logging config (RichHandler, stderr)
+│       └── errors.py                 # user-facing error types
 └── tests/
-    ├── conftest.py                   # 隔离工作目录，避免读到真实 .env
+    ├── conftest.py                   # isolate working directory from a real .env
     ├── index/
-    │   ├── test_create.py            # createIndexes 分组与命令构造测试
-    │   ├── test_definitions.py       # 定义文件校验测试
-    │   ├── test_drop.py              # dropIndexes 命令测试
-    │   ├── test_export.py            # 索引导出与文件命名测试
-    │   ├── test_mongo.py             # MongoDB URI 与存在性检查测试
-    │   └── test_plan.py              # 索引存在性/选项比较测试
-    ├── test_cli.py                   # CLI 端到端测试
-    ├── test_atlas.py                 # Atlas 辅助逻辑测试
-    ├── test_env.py                   # .env 加载测试
-    └── test_log.py                   # 颜色/日志配置测试
+    │   ├── test_create.py            # createIndexes grouping and command tests
+    │   ├── test_definitions.py       # definition validation tests
+    │   ├── test_drop.py              # dropIndexes command tests
+    │   ├── test_export.py            # index export and filename tests
+    │   ├── test_mongo.py             # MongoDB URI and namespace tests
+    │   └── test_plan.py              # index/option comparison tests
+    ├── test_cli.py                   # end-to-end CLI tests
+    ├── test_atlas.py                 # Atlas helper tests
+    ├── test_env.py                   # .env loading tests
+    └── test_log.py                   # color/logging configuration tests
 ```
 
-## 依赖说明
+## Dependencies
 
-`pyatlassdk` 通过 `[tool.uv.sources]` 以 editable 方式指向本地 checkout：
+`pyatlassdk` points to a local checkout in editable mode through
+`[tool.uv.sources]`:
 
 ```toml
 pyatlassdk = { path = "../mongo-atlas-sdk/pyatlassdk", editable = true }
 ```
 
-仓库布局不同时改这一行即可。SDK 发布到 PyPI 后可以换成版本号。
+Adjust this line if your repository layout differs. Once the SDK is published to
+PyPI, this can be replaced with a version constraint.
 
-## 添加新命令
+## Adding a new command
 
-在 `src/sie_atlas_ops/cli.py` 中新增：
+Add a command in `src/sie_atlas_ops/cli.py`:
 
 ```python
 @app.command()
@@ -312,7 +370,7 @@ def hello(name: str = typer.Argument(..., help="Name to greet.")) -> None:
     typer.echo(f"Hello, {name}!")
 ```
 
-命令分组（子应用）：
+Command groups (sub-applications) work like this:
 
 ```python
 users_app = typer.Typer(help="Manage users.", no_args_is_help=True)
@@ -323,4 +381,5 @@ app.add_typer(users_app, name="users")
 def list_users() -> None: ...
 ```
 
-新增入口后即可通过 `uv run sie-atlas-ops hello World` 调用；在本地已安装（editable）的情况下无需重新安装。
+After adding an entry point, invoke it with `uv run sie-atlas-ops hello World`; no
+reinstall is needed while the package is installed in editable mode.
