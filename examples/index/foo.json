@@ -1,0 +1,9 @@
+{
+    "database": "exampleDB",
+    "collection": "example",
+    "indexes": [{
+        "keys": {"field": 1},
+        "options": {"name": "field_index"},
+        "commitQuorum": 1
+    }]
+}
