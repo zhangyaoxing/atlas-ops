@@ -12,6 +12,7 @@ commands into a sub-application:
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from datetime import datetime, timezone
@@ -42,9 +43,11 @@ from sie_atlas_ops.atlas import (
 from sie_atlas_ops.env import load_env
 from sie_atlas_ops.errors import AtlasOperationError, OpsError
 from sie_atlas_ops.index_definitions import CollectionIndexes, load_index_definitions
+from sie_atlas_ops.index_plan import IndexAction, IndexPlanItem, plan_indexes
 from sie_atlas_ops.log import configure_logging
 from sie_atlas_ops.mongo import (
     MissingNamespace,
+    MongoClientLike,
     build_authenticated_uri,
     create_client,
     find_missing_namespaces,
@@ -120,9 +123,9 @@ def index(
     resolved from the argument, the environment, or an interactive prompt; the
     cluster is looked up inside that project, and one of its connection strings
     is selected interactively. A cluster-scoped temporary database user is then
-    created and expires after six hours. Finally, missing databases and
-    collections are reported and confirmed. Creating the indexes is not
-    implemented yet.
+    created and expires after six hours. Missing databases and collections are
+    reported and confirmed, and existing indexes are compared by key pattern
+    and options. Creating the indexes is not implemented yet.
     """
     try:
         definitions = load_index_definitions(directory)
@@ -157,15 +160,22 @@ def index(
                 _format_utc(temporary_user.delete_after),
             )
 
-        missing = _check_namespaces(selected, temporary_user, definitions)
-        if missing:
-            _report_missing(missing)
-            if not typer.confirm(
-                "Continue and let MongoDB create the missing databases/collections?",
-                default=False,
-            ):
-                typer.echo("Aborted.")
-                raise typer.Exit(code=1)
+        mongo_client = _open_mongo_client(selected, temporary_user)
+        try:
+            missing = find_missing_namespaces(mongo_client, definitions)
+            if missing:
+                _report_missing(missing)
+                if not typer.confirm(
+                    "Continue and let MongoDB create the missing databases/collections?",
+                    default=False,
+                ):
+                    typer.echo("Aborted.")
+                    raise typer.Exit(code=1)
+            plan = plan_indexes(mongo_client, definitions, missing)
+        finally:
+            mongo_client.close()
+
+        _log_index_plan(plan)
     except OpsError as exc:
         _fail(str(exc))
     except AtlasApiError as exc:
@@ -218,23 +228,16 @@ def _resolve_references(project: str | None, cluster: str | None) -> tuple[str, 
     return project_ref, cluster_ref
 
 
-def _check_namespaces(
-    selected: ConnectionOption,
-    temporary_user: TemporaryUser,
-    definitions: list[CollectionIndexes],
-) -> list[MissingNamespace]:
+def _open_mongo_client(
+    selected: ConnectionOption, temporary_user: TemporaryUser
+) -> MongoClientLike:
     try:
         uri = build_authenticated_uri(
             selected.uri, temporary_user.username, temporary_user.password
         )
     except ValueError as exc:
         raise AtlasOperationError(str(exc)) from exc
-
-    mongo_client = create_client(uri)
-    try:
-        return find_missing_namespaces(mongo_client, definitions)
-    finally:
-        mongo_client.close()
+    return create_client(uri)
 
 
 def _report_missing(missing: list[MissingNamespace]) -> None:
@@ -248,6 +251,36 @@ def _report_missing(missing: list[MissingNamespace]) -> None:
                 'Database "%s" does not exist (collection "%s" would be created).',
                 database,
                 collection,
+            )
+
+
+def _log_index_plan(plan: list[IndexPlanItem]) -> None:
+    for item in plan:
+        keys = escape(json.dumps(item.spec.keys))
+        if item.action is IndexAction.IDENTICAL:
+            logger.info(
+                'Index %s on "%s.%s" already exists with identical options; skipping.',
+                keys,
+                escape(item.database),
+                escape(item.collection),
+            )
+        elif item.action is IndexAction.DIFFERENT:
+            existing_options = escape(
+                json.dumps(item.existing_options or {}, default=str, sort_keys=True)
+            )
+            requested_options = escape(
+                json.dumps(item.spec.options or {}, default=str, sort_keys=True)
+            )
+            logger.warning(
+                'Index %s on "%s.%s" already exists with different options '
+                '(existing name "%s", existing options %s, requested options %s); '
+                "skipping.",
+                keys,
+                escape(item.database),
+                escape(item.collection),
+                escape(item.existing_name or ""),
+                existing_options,
+                requested_options,
             )
 
 
@@ -348,7 +381,7 @@ def _print_summary(
             f"{len(definition.indexes)} index(es) ({definition.path.name})"
         )
     typer.echo("")
-    typer.echo("Index creation is not implemented yet; stopping after connection selection.")
+    typer.echo("Index creation is not implemented yet.")
 
 
 def _format_utc(value: datetime) -> str:

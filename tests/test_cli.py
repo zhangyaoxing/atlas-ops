@@ -75,24 +75,47 @@ def _detail(**connection_strings: str) -> ClusterDescription20240805:
     )
 
 
+class FakeMongoCollection:
+    def __init__(self, indexes: list[dict[str, Any]]) -> None:
+        self._indexes = indexes
+
+    def list_indexes(self) -> list[dict[str, Any]]:
+        return list(self._indexes)
+
+
 class FakeMongoDatabase:
-    def __init__(self, collections: list[str]) -> None:
+    def __init__(
+        self,
+        collections: list[str],
+        indexes: dict[tuple[str, str], list[dict[str, Any]]],
+        database: str,
+    ) -> None:
         self._collections = collections
+        self._indexes = indexes
+        self._database = database
 
     def list_collection_names(self) -> list[str]:
         return list(self._collections)
 
+    def __getitem__(self, collection: str) -> FakeMongoCollection:
+        return FakeMongoCollection(self._indexes.get((self._database, collection), []))
+
 
 class FakeMongoClient:
-    def __init__(self, databases: dict[str, list[str]]) -> None:
+    def __init__(
+        self,
+        databases: dict[str, list[str]],
+        indexes: dict[tuple[str, str], list[dict[str, Any]]] | None = None,
+    ) -> None:
         self._databases = databases
+        self._indexes = indexes or {}
         self.closed = False
 
     def list_database_names(self) -> list[str]:
         return list(self._databases)
 
     def __getitem__(self, database: str) -> FakeMongoDatabase:
-        return FakeMongoDatabase(self._databases.get(database, []))
+        return FakeMongoDatabase(self._databases.get(database, []), self._indexes, database)
 
     def close(self) -> None:
         self.closed = True
@@ -296,6 +319,62 @@ def test_index_reports_mongo_errors(tmp_path: Path, monkeypatch: pytest.MonkeyPa
 
     assert result.exit_code == 1
     assert "MongoDB request failed: boom" in result.output
+
+
+def test_index_skips_identical_existing_index(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_definitions(tmp_path)
+    client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail(standard="mongodb://only"))
+    _patch_client(monkeypatch, client)
+    existing = [{"v": 2, "key": {"field": 1}, "name": "field_index"}]
+    mongo_client = FakeMongoClient({"exampleDB": ["example"]}, {("exampleDB", "example"): existing})
+    monkeypatch.setattr("sie_atlas_ops.cli.create_client", lambda uri: mongo_client)
+    handler = _CaptureHandler()
+    package_logger = logging.getLogger("sie_atlas_ops")
+    package_logger.addHandler(handler)
+    try:
+        result = runner.invoke(app, ["index", str(tmp_path), GROUP_A.id, "cluster0"])
+    finally:
+        package_logger.removeHandler(handler)
+
+    assert result.exit_code == 0, result.output
+    assert any(
+        "already exists with identical options; skipping." in message
+        for message in handler.messages
+    )
+    assert not any("different options" in message for message in handler.messages)
+
+
+def test_index_warns_about_existing_index_with_different_options(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_definitions(tmp_path)
+    client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail(standard="mongodb://only"))
+    _patch_client(monkeypatch, client)
+    existing = [
+        {
+            "v": 2,
+            "key": {"field": 1},
+            "name": "other_index",
+            "unique": True,
+        }
+    ]
+    mongo_client = FakeMongoClient({"exampleDB": ["example"]}, {("exampleDB", "example"): existing})
+    monkeypatch.setattr("sie_atlas_ops.cli.create_client", lambda uri: mongo_client)
+    handler = _CaptureHandler()
+    package_logger = logging.getLogger("sie_atlas_ops")
+    package_logger.addHandler(handler)
+    try:
+        result = runner.invoke(app, ["index", str(tmp_path), GROUP_A.id, "cluster0"])
+    finally:
+        package_logger.removeHandler(handler)
+
+    assert result.exit_code == 0, result.output
+    warning = next(message for message in handler.messages if "different options" in message)
+    assert "other_index" in warning
+    assert "skipping" in warning
+    assert not any("identical options" in message for message in handler.messages)
 
 
 def test_index_accepts_cluster_id(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
