@@ -56,6 +56,33 @@ def test_optional_fields_may_be_omitted(tmp_path: Path) -> None:
     assert definitions[0].indexes[1].keys == {"c": "text"}
 
 
+def test_key_directions_accept_decimals(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "indexes.json",
+        _payload(indexes=[{"keys": {"ascending": 1.0, "descending": -1.0}}]),
+    )
+
+    keys = load_index_definitions(tmp_path)[0].indexes[0].keys
+
+    assert keys == {"ascending": 1.0, "descending": -1.0}
+
+
+@pytest.mark.parametrize("direction", [0, 2, 0.0, 0.5, 1.5, -1.5])
+def test_invalid_key_direction_is_rejected(tmp_path: Path, direction: int | float) -> None:
+    _write(
+        tmp_path,
+        "indexes.json",
+        _payload(indexes=[{"keys": {"a": direction}}]),
+    )
+
+    with pytest.raises(
+        IndexDefinitionError,
+        match=r"indexes\[0\]\.keys\.a must be 1, -1, 1\.0, -1\.0",
+    ):
+        load_index_definitions(tmp_path)
+
+
 def test_commit_quorum_accepts_strings(tmp_path: Path) -> None:
     _write(
         tmp_path,
@@ -130,7 +157,7 @@ def test_unknown_index_field_is_rejected(tmp_path: Path) -> None:
         ({"indexes": {}}, "'indexes' must be a non-empty array"),
         (
             {"indexes": [{"keys": {"a": True}}]},
-            r"indexes\[0\]\.keys\.a must be 1, -1, or a string index type",
+            r"indexes\[0\]\.keys\.a must be 1, -1, 1\.0, -1\.0, or a string index type",
         ),
         (
             {"indexes": [{"keys": {"a": 1}, "options": "name"}]},

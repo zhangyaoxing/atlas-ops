@@ -35,7 +35,7 @@ _INDEX_FIELDS = {"keys", "options", "commitQuorum"}
 class IndexSpec:
     """One entry of a MongoDB ``createIndexes`` command."""
 
-    keys: dict[str, int | str]
+    keys: dict[str, int | float | str]
     options: dict[str, Any] | None = None
     commit_quorum: int | str | None = None
 
@@ -145,21 +145,29 @@ def _parse_index(raw: Any, where: str, errors: list[str]) -> IndexSpec | None:
     return IndexSpec(keys=keys, options=options, commit_quorum=commit_quorum)
 
 
-def _parse_keys(raw: Any, where: str, errors: list[str]) -> dict[str, int | str] | None:
+def _parse_keys(raw: Any, where: str, errors: list[str]) -> dict[str, int | float | str] | None:
     if not isinstance(raw, dict) or not raw:
         errors.append(f"{where} must be a non-empty object")
         return None
 
-    keys: dict[str, int | str] = {}
+    keys: dict[str, int | float | str] = {}
     for field, direction in raw.items():
         if not isinstance(field, str) or not field:
             errors.append(f"{where} contains an invalid field name")
             continue
-        if isinstance(direction, bool) or not isinstance(direction, (int, str)):
-            errors.append(f"{where}.{field} must be 1, -1, or a string index type")
+        if isinstance(direction, bool):
+            errors.append(f"{where}.{field} must be 1, -1, 1.0, -1.0, or a string index type")
             continue
-        if isinstance(direction, str) and not direction:
-            errors.append(f"{where}.{field} must not be an empty string")
+        if isinstance(direction, (int, float)):
+            if direction not in (1, -1):
+                errors.append(f"{where}.{field} must be 1, -1, 1.0, -1.0, or a string index type")
+                continue
+        elif isinstance(direction, str):
+            if not direction:
+                errors.append(f"{where}.{field} must not be an empty string")
+                continue
+        else:
+            errors.append(f"{where}.{field} must be 1, -1, 1.0, -1.0, or a string index type")
             continue
         keys[field] = direction
     return keys or None

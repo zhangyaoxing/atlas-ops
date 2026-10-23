@@ -37,7 +37,7 @@ class ExplodingClient:
         raise AssertionError("indexes must not be listed for missing namespaces")
 
 
-def _spec(keys: dict[str, int | str], options: dict[str, Any] | None = None) -> IndexSpec:
+def _spec(keys: dict[str, int | float | str], options: dict[str, Any] | None = None) -> IndexSpec:
     return IndexSpec(keys=keys, options=options)
 
 
@@ -133,6 +133,16 @@ def test_key_order_must_match() -> None:
     plan = plan_indexes(client, [_definition(_spec({"a": 1, "b": 1}))], [])
 
     assert plan.items[0].action is IndexAction.CREATE
+
+
+def test_decimal_directions_match_existing_integer_keys() -> None:
+    client = FakeClient(
+        {"exampleDB": {"example": [{"v": 2, "key": {"field": 1}, "name": "field_1"}]}}
+    )
+
+    plan = plan_indexes(client, [_definition(_spec({"field": 1.0}))], [])
+
+    assert plan.items[0].action is IndexAction.IDENTICAL
 
 
 def test_missing_namespace_is_created_without_listing() -> None:

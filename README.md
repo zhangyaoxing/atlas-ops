@@ -113,6 +113,8 @@ JSON 格式：
 
 - `database`、`collection`、`indexes` 必填；`indexes` 不能为空数组
 - 每个索引的 `keys` 必填；`options`、`commitQuorum` 可选
+- `keys` 的数值方向支持 `1` / `-1`，也接受小数形式 `1.0` / `-1.0`；其他数值会被拒绝
+- `keys` 的值也可以是字符串索引类型（如 `text`、`hashed`）
 - 未知字段会被拒绝，便于尽早发现拼写错误
 - 多个文件的校验错误会一次性全部报告
 
