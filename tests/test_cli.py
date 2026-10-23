@@ -37,6 +37,7 @@ class FakeAtlasClient:
         self.get_group_calls: list[str] = []
         self.get_cluster_calls: list[tuple[str, str]] = []
         self.created_user_payload: dict[str, Any] | None = None
+        self.deleted_user_paths: list[str] = []
         self.projects = SimpleNamespace(get_group=self._get_group)
         self.clusters = SimpleNamespace(
             list_group_clusters=self._list_clusters,
@@ -44,6 +45,9 @@ class FakeAtlasClient:
         )
 
     def request(self, method: str, path: str, **kwargs: Any) -> Any:
+        if method == "DELETE":
+            self.deleted_user_paths.append(path)
+            return None
         self.created_user_payload = kwargs["json"]
         return CloudDatabaseUser.model_validate(kwargs["json"])
 
@@ -245,9 +249,10 @@ def test_index_creates_temporary_user(tmp_path: Path, monkeypatch: pytest.Monkey
     remaining = delete_after - datetime.now(timezone.utc)
     assert timedelta(hours=5, minutes=59) <= remaining <= timedelta(hours=6, minutes=1)
 
-    assert f"Temporary user: {payload['username']}" in result.output
-    assert f"Password:       {payload['password']}" in result.output
-    assert "Expires:" in result.output
+    assert client.deleted_user_paths == [
+        f"/groups/{GROUP_A.id}/databaseUsers/admin/{payload['username']}"
+    ]
+    assert payload["password"] not in result.output
 
 
 def test_index_creates_pending_indexes(
@@ -339,6 +344,7 @@ def test_index_aborts_when_missing_namespace_declined(
     assert result.exit_code == 1
     assert "Aborted." in result.output
     assert "Index creation complete" not in result.output
+    assert len(client.deleted_user_paths) == 1
 
 
 def test_index_connects_with_temporary_credentials(
@@ -373,6 +379,29 @@ def test_index_reports_mongo_errors(tmp_path: Path, monkeypatch: pytest.MonkeyPa
 
     assert result.exit_code == 1
     assert "MongoDB request failed: boom" in result.output
+    assert len(client.deleted_user_paths) == 1
+
+
+def test_index_warns_when_temporary_user_deletion_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_definitions(tmp_path)
+
+    class FailingDeleteClient(FakeAtlasClient):
+        def request(self, method: str, path: str, **kwargs: Any) -> Any:
+            if method == "DELETE":
+                raise AtlasApiError(500, "boom", {"detail": "delete failed"})
+            return super().request(method, path, **kwargs)
+
+    client = FailingDeleteClient(
+        [GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail(standard="mongodb://only")
+    )
+    _patch_client(monkeypatch, client)
+
+    result = runner.invoke(app, ["index", str(tmp_path), GROUP_A.id, "cluster0"])
+
+    assert result.exit_code == 0, result.output
+    assert "Could not delete temporary user" in result.output
 
 
 def test_index_skips_identical_existing_index(
@@ -583,6 +612,7 @@ def test_index_reports_project_not_found(tmp_path: Path, monkeypatch: pytest.Mon
 
     assert result.exit_code == 1
     assert "not found or is not accessible" in result.output
+    assert client.deleted_user_paths == []
 
 
 def test_index_auto_selects_single_connection_string(
@@ -778,6 +808,8 @@ def test_index_logs_found_cluster_and_connection_strings(
     assert any("Created temporary user [cyan]" in message for message in handler.messages)
     assert any("Waiting for temporary user [cyan]" in message for message in handler.messages)
     assert any("Temporary user is active." in message for message in handler.messages)
+    assert any("Deleting temporary user [cyan]" in message for message in handler.messages)
+    assert any("Temporary user deleted." in message for message in handler.messages)
     password = client.created_user_payload["password"]
     assert all(password not in message for message in handler.messages)
 

@@ -29,12 +29,14 @@ from sie_atlas_ops import __version__
 from sie_atlas_ops.atlas import (
     CLUSTER_NAME_ENV,
     PROJECT_ID_ENV,
+    AtlasClientLike,
     ClusterTarget,
     ConnectionOption,
     TemporaryUser,
     client_from_env,
     connection_options,
     create_temporary_user,
+    delete_temporary_user,
     describe_atlas_error,
     find_clusters,
     get_project,
@@ -128,13 +130,12 @@ def index(
     created and expires after six hours; the command waits for that user to
     become active. Missing databases and collections are reported and confirmed,
     existing indexes are compared by key pattern and options, and the remaining
-    indexes are created.
+    indexes are created. The temporary user is deleted on every exit path.
     """
     try:
         definitions = load_index_definitions(directory)
-        client = client_from_env()
-        project_id, cluster_ref = _resolve_references(project, cluster)
-        with client:
+        with client_from_env() as client:
+            project_id, cluster_ref = _resolve_references(project, cluster)
             target_project = get_project(client, project_id)
             matches = find_clusters(client, target_project, cluster_ref)
             if not matches:
@@ -156,40 +157,46 @@ def index(
                 escape(selected.label),
                 escape(selected.uri),
             )
-            temporary_user = create_temporary_user(client, target_project, target.cluster_name)
-            logger.info(
-                "Created temporary user [cyan]%s[/cyan] (expires %s UTC)",
-                escape(temporary_user.username),
-                _format_utc(temporary_user.delete_after),
-            )
 
-        mongo_client = _open_mongo_client(selected, temporary_user)
-        try:
-            logger.info(
-                "Waiting for temporary user [cyan]%s[/cyan] to become active...",
-                escape(temporary_user.username),
-            )
-            wait_for_user(mongo_client)
-            logger.info("Temporary user is active.")
-            missing = find_missing_namespaces(mongo_client, definitions)
-            if missing:
-                _report_missing(missing)
-                if not typer.confirm(
-                    "Continue and let MongoDB create the missing databases/collections?",
-                    default=False,
-                ):
-                    typer.echo("Aborted.")
-                    raise typer.Exit(code=1)
-            plan = plan_indexes(mongo_client, definitions, missing)
-            _log_index_plan(plan)
-            pending = sum(1 for item in plan if item.action is IndexAction.CREATE)
-            if pending:
-                logger.info("Creating %d index(es)...", pending)
-            created = create_indexes(mongo_client, plan)
-        finally:
-            mongo_client.close()
+            temporary_user: TemporaryUser | None = None
+            try:
+                temporary_user = create_temporary_user(client, target_project, target.cluster_name)
+                logger.info(
+                    "Created temporary user [cyan]%s[/cyan] (expires %s UTC)",
+                    escape(temporary_user.username),
+                    _format_utc(temporary_user.delete_after),
+                )
 
-        _log_created(created)
+                mongo_client = _open_mongo_client(selected, temporary_user)
+                try:
+                    logger.info(
+                        "Waiting for temporary user [cyan]%s[/cyan] to become active...",
+                        escape(temporary_user.username),
+                    )
+                    wait_for_user(mongo_client)
+                    logger.info("Temporary user is active.")
+                    missing = find_missing_namespaces(mongo_client, definitions)
+                    if missing:
+                        _report_missing(missing)
+                        if not typer.confirm(
+                            "Continue and let MongoDB create the missing databases/collections?",
+                            default=False,
+                        ):
+                            typer.echo("Aborted.")
+                            raise typer.Exit(code=1)
+                    plan = plan_indexes(mongo_client, definitions, missing)
+                    _log_index_plan(plan)
+                    pending = sum(1 for item in plan if item.action is IndexAction.CREATE)
+                    if pending:
+                        logger.info("Creating %d index(es)...", pending)
+                    created = create_indexes(mongo_client, plan)
+                finally:
+                    mongo_client.close()
+
+                _log_created(created)
+            finally:
+                if temporary_user is not None:
+                    _delete_temporary_user(client, project_id, temporary_user)
     except OpsError as exc:
         _fail(str(exc))
     except AtlasApiError as exc:
@@ -204,7 +211,6 @@ def index(
         definitions,
         target,
         selected,
-        temporary_user,
         sum(len(result.names) for result in created),
     )
 
@@ -319,6 +325,22 @@ def _log_created(created: list[CreateResult]) -> None:
         )
 
 
+def _delete_temporary_user(
+    client: AtlasClientLike, project_id: str, temporary_user: TemporaryUser
+) -> None:
+    logger.info("Deleting temporary user [cyan]%s[/cyan]...", escape(temporary_user.username))
+    try:
+        delete_temporary_user(client, project_id, temporary_user.username)
+    except Exception as exc:  # cleanup must not mask the original failure
+        logger.warning(
+            "Could not delete temporary user [cyan]%s[/cyan]: %s",
+            escape(temporary_user.username),
+            exc,
+        )
+    else:
+        logger.info("Temporary user deleted.")
+
+
 def _prompt_project() -> str:
     while True:
         value = typer.prompt("Project ID (24 hexadecimal characters)").strip()
@@ -397,7 +419,6 @@ def _print_summary(
     definitions: list[CollectionIndexes],
     target: ClusterTarget,
     selected: ConnectionOption,
-    temporary_user: TemporaryUser,
     created_count: int,
 ) -> None:
     typer.echo("")
@@ -405,10 +426,6 @@ def _print_summary(
     typer.echo(f"Project:    {target.project_name} ({target.project_id})")
     typer.echo(f'Connection: "{selected.uri}"')
     typer.echo(f"            [{selected.label}]")
-    typer.echo("")
-    typer.echo(f"Temporary user: {temporary_user.username}")
-    typer.echo(f"Password:       {temporary_user.password}")
-    typer.echo(f"Expires:        {_format_utc(temporary_user.delete_after)} UTC")
     typer.echo("")
     typer.echo(f"Loaded {len(definitions)} collection definition(s) from {directory}:")
     for definition in definitions:

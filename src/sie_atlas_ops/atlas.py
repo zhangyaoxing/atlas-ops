@@ -10,6 +10,7 @@ from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Protocol
+from urllib.parse import quote
 
 from pyatlassdk import AtlasApiError, AtlasClient
 from pyatlassdk.models.cloud_database_user import CloudDatabaseUser
@@ -240,6 +241,21 @@ def create_temporary_user(
         password=password,
         delete_after=created.delete_after_date or delete_after,
     )
+
+
+def delete_temporary_user(client: AtlasClientLike, project_id: str, username: str) -> None:
+    """Delete a temporary database user; an already-missing user is not an error."""
+    try:
+        client.request(
+            method="DELETE",
+            path=(f"/groups/{project_id}/databaseUsers/admin/{quote(username, safe='')}"),
+            response_model=None,
+            accept=_DATABASE_USER_ACCEPT,
+        )
+    except AtlasApiError as exc:
+        if exc.status_code == 404:
+            return
+        raise
 
 
 def _generate_username() -> str:

@@ -111,7 +111,9 @@ JSON 格式：
 10. 对需要创建的索引执行 `createIndexes`：按 `(database, collection, commitQuorum)`
     分批，每批发一条命令；索引名取 options 里的 `name`，没有则按 MongoDB 规则生成
     （如 `a_1_b_-1`）；`commitQuorum` 放在命令级
-11. 输出集群、项目、临时用户凭据和已加载的索引定义摘要
+11. 无论正常结束、报错还是中止，退出前都调用 Atlas API 删除临时用户（只发送 DELETE，
+    不等待 MongoDB 侧生效；删除失败只记录 WARNING）
+12. 输出集群、项目和已加载的索引定义摘要
 
 命令在创建索引后结束。创建数据库用户需要 Atlas API Key 具备相应权限
 （例如 Project Owner 或 Project Database Access Admin）。
@@ -120,15 +122,9 @@ JSON 格式：
 
 如果确认继续，MongoDB 会在创建索引时隐式创建缺失的库和集合；选择中止则退出码为 1。
 
-摘要中的临时用户凭据只写到 stdout，不会进入日志：
+临时用户的凭据只在运行期间存在，不再输出到摘要。`deleteAfterDate` 的 6 小时过期仍作为兜底，防止进程被强杀时用户永久残留。
 
-```text
-Temporary user: sie_atlas_ops_6c4c1581ad60
-Password:       BK%m18!EdoJA3X*c2wE79&Ws
-Expires:        2026-10-23 17:53:15 UTC
-```
-
-密码是随机生成的，包含大小写字母、数字和特殊字符；后续把它拼进连接串时需要 URL 编码。
+## 日志
 
 ## 日志
 

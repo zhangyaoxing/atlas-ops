@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Any
+from urllib.parse import quote
 
 import pytest
 from pyatlassdk import AtlasApiError
@@ -15,6 +16,7 @@ from sie_atlas_ops.atlas import (
     client_from_env,
     connection_options,
     create_temporary_user,
+    delete_temporary_user,
     describe_atlas_error,
     find_clusters,
     get_project,
@@ -313,3 +315,42 @@ def test_create_temporary_user_generates_credentials() -> None:
     assert any(char in "!@#$%^&*" for char in user.password)
     remaining = user.delete_after - datetime.now(timezone.utc)
     assert timedelta(minutes=59) <= remaining <= timedelta(hours=1, minutes=1)
+
+
+class _DeleteRequestClient:
+    def __init__(self, error: Exception | None = None) -> None:
+        self.calls: list[dict[str, Any]] = []
+        self.error = error
+
+    def request(self, method: str, path: str, **kwargs: Any) -> Any:
+        self.calls.append({"method": method, "path": path, **kwargs})
+        if self.error is not None:
+            raise self.error
+        return None
+
+
+def test_delete_temporary_user_sends_delete_request() -> None:
+    client = _DeleteRequestClient()
+
+    delete_temporary_user(client, GROUP_A.id, "user name@example")
+
+    call = client.calls[0]
+    assert call["method"] == "DELETE"
+    assert call["path"] == (
+        f"/groups/{GROUP_A.id}/databaseUsers/admin/{quote('user name@example', safe='')}"
+    )
+    assert call["response_model"] is None
+    assert call["accept"] == "application/vnd.atlas.2023-01-01+json"
+
+
+def test_delete_temporary_user_ignores_missing_user() -> None:
+    client = _DeleteRequestClient(AtlasApiError(404, "Not Found", None))
+
+    delete_temporary_user(client, GROUP_A.id, "already-gone")
+
+
+def test_delete_temporary_user_propagates_other_errors() -> None:
+    client = _DeleteRequestClient(AtlasApiError(500, "boom", None))
+
+    with pytest.raises(AtlasApiError):
+        delete_temporary_user(client, GROUP_A.id, "user")
