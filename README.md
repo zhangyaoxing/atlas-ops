@@ -26,32 +26,46 @@ cp .env.example .env
 # 编辑 .env，填入 ATLAS_PUBLIC_KEY / ATLAS_PRIVATE_KEY
 ```
 
+还可以在 `.env` 里预置 `ATLAS_PROJECT_ID` 和 `ATLAS_CLUSTER_NAME`，命令参数省略时会使用它们。
+
 工具启动时会从当前工作目录向上查找最近的 `.env` 并加载。已经通过 shell 导出的变量优先于文件内容，因此临时覆盖可以这样写：
 
 ```bash
-ATLAS_PUBLIC_KEY=... ATLAS_PRIVATE_KEY=... uv run sie-atlas-ops index ./examples/indexes cluster0
+ATLAS_PUBLIC_KEY=... ATLAS_PRIVATE_KEY=... uv run sie-atlas-ops index ./examples/indexes 64f1a2b3c4d5e6f7a8b9c0d1 cluster0
 ```
 
-`.env` 已被 git 忽略，不会误提交凭据。也可以完全不使用 `.env`，直接 `export ATLAS_PUBLIC_KEY=...` / `ATLAS_PRIVATE_KEY=...`。
+`.env` 已被 git 忽略，不会误提交凭据。也可以完全不使用 `.env`，直接 `export` 相应变量。
 
 ## 命令
 
 ### `index`
 
-读取目录下每个 JSON 文件（一个文件描述一个集合的索引），通过 Atlas API 按集群 ID 或
-名称定位集群，再从该集群的连接串中选择一个使用。
+读取目录下每个 JSON 文件（一个文件描述一个集合的索引），在指定 project 内按集群 ID
+或名称定位集群，再从该集群的连接串中选择一个使用。
 
 ```bash
-uv run sie-atlas-ops index ./examples/indexes cluster0
+# 项目 ID + 集群名
+uv run sie-atlas-ops index ./examples/indexes 64f1a2b3c4d5e6f7a8b9c0d1 cluster0
 
-# 24 位十六进制会被当作集群 ID，否则按名称查找
-uv run sie-atlas-ops index ./examples/indexes 64f1a2b3c4d5e6f7a8b9c0d1
+# 集群 ID 也可以（24 位十六进制）
+uv run sie-atlas-ops index ./examples/indexes 64f1a2b3c4d5e6f7a8b9c0d1 b1c2d3e4f5a6b7c8d9e0f1a2
+
+# 从 .env / 环境变量读取 project 和 cluster
+uv run sie-atlas-ops index ./examples/indexes
+
+# 只给一个位置参数时会自动推断：
+# - 设了 ATLAS_PROJECT_ID、没设 ATLAS_CLUSTER_NAME → 该参数是集群（名称或 ID）
+# - 否则 24 位十六进制 → project；非 24 位十六进制 → 集群名
+uv run sie-atlas-ops index ./examples/indexes cluster0
 ```
 
-参数：
+参数（按顺序）：
 
 - `DIRECTORY`：存放 `*.json` 的目录（不递归子目录）
-- `CLUSTER`：集群 ID（24 位十六进制）或集群名称；名称先精确匹配，再尝试不区分大小写
+- `PROJECT`：project ID（24 位十六进制）；省略时依次取 `ATLAS_PROJECT_ID`、交互输入
+- `CLUSTER`：集群 ID 或名称；省略时依次取 `ATLAS_CLUSTER_NAME`、交互输入
+
+集群名称先精确匹配，再尝试不区分大小写，且只在指定 project 内查找。
 
 JSON 格式：
 
@@ -80,10 +94,12 @@ JSON 格式：
 
 1. 读取并校验目录下所有 JSON 文件
 2. 加载最近的 `.env`，再读取 Atlas API 凭据（shell 变量优先）
-3. 遍历可访问的项目查找集群；多个同名集群时提示选择
-4. 拉取集群详情并列出全部连接串（standard / standardSrv / private / privateSrv /
+3. 解析 project：命令行参数 → `ATLAS_PROJECT_ID` → 交互输入（校验 24 位十六进制）
+4. 解析集群：命令行参数 → `ATLAS_CLUSTER_NAME` → 交互输入；在指定 project 内按 ID
+   或名称查找，多个同名集群时提示选择
+5. 拉取集群详情并列出全部连接串（standard / standardSrv / private / privateSrv /
    awsPrivateLink / privateEndpoint）；多个时提示选择
-5. 输出集群、项目和已加载的索引定义摘要
+6. 输出集群、项目和已加载的索引定义摘要
 
 索引创建本身尚未实现，命令在选定连接串后结束。
 
@@ -96,12 +112,29 @@ JSON 格式：
 ```text
 12:00:00 INFO     Found cluster cluster0 (64f1…) by name in project Project Atlas (…)
          INFO     Found 2 connection string(s) for cluster cluster0
-         INFO       1. standard: mongodb://…
-         INFO       2. standard_srv: mongodb+srv://…
-         INFO     Selected connection string standard_srv: mongodb+srv://…
+         INFO       1. standard: "mongodb://…"
+         INFO       2. standard_srv: "mongodb+srv://…"
+         INFO     Selected connection string standard_srv: "mongodb+srv://…"
 ```
 
-集群名显示为绿色，连接串标签显示为青色。
+集群名和项目名显示为绿色，连接串标签显示为青色，连接串本身用双引号包裹。
+
+## VS Code 调试
+
+仓库自带 `.vscode/` 配置。用 VS Code 打开项目后：
+
+1. 安装推荐扩展（Python、Python Debugger、Pylance、Ruff）
+2. 解释器选择 `${workspaceFolder}/.venv/bin/python`（`settings.json` 已设默认）
+3. 在 Run and Debug 中选择配置：
+
+- `index: interactive (env / prompts)`：使用 `examples/indexes`，project/cluster 从 `.env` 或环境变量读取，缺失时在集成终端里输入
+- `index: directory + project + cluster`：依次输入目录、project ID、cluster；project/cluster 留空则回退到环境变量/交互输入
+- `pytest: current file`：调试当前打开的测试文件
+- `version` / `help`
+
+所有配置都使用集成终端（`console: integratedTerminal`），CLI 的交互提示可以正常输入。断点直接打在 `src/sie_atlas_ops/` 下即可；默认 `justMyCode: true`，如需步入 `pyatlassdk` 内部，把它改成 `false`。
+
+`.env` 由程序自身加载，因此调试时无需额外配置 envFile。
 
 ## 开发
 
@@ -124,6 +157,7 @@ source .venv/bin/activate
 ├── pyproject.toml                    # 项目元数据、依赖、工具配置
 ├── .python-version                   # 固定 Python 3.10
 ├── .env.example                      # 环境变量模板（复制为 .env）
+├── .vscode/                          # VS Code 调试、测试、格式化配置
 ├── examples/indexes/example.json     # 索引定义示例
 ├── src/
 │   └── sie_atlas_ops/
@@ -153,6 +187,8 @@ pyatlassdk = { path = "../mongo-atlas-sdk/pyatlassdk", editable = true }
 ```
 
 仓库布局不同时改这一行即可。SDK 发布到 PyPI 后可以换成版本号。
+
+注意：`pyatlassdk` 生成的资源路径以 `/api/atlas/v2` 开头，而它当前的默认 `base_url` 也包含该前缀，直接使用默认值会产生重复路径，需要在 `pyatlassdk` 侧把默认值改为仅主机名。
 
 ## 添加新命令
 

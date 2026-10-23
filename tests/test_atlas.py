@@ -9,29 +9,36 @@ from pyatlassdk.models.cluster_description20240805 import ClusterDescription2024
 
 from sie_atlas_ops.atlas import (
     ClusterTarget,
+    ProjectTarget,
     client_from_env,
     connection_options,
     describe_atlas_error,
     find_clusters,
+    get_project,
     is_object_id,
 )
 from sie_atlas_ops.errors import AtlasOperationError, ConfigurationError
 
 GROUP_A = SimpleNamespace(id="a" * 24, name="Project A")
-GROUP_B = SimpleNamespace(id="c" * 24, name="Project B")
 CLUSTER_A = SimpleNamespace(id="b" * 24, name="cluster0")
 CLUSTER_B = SimpleNamespace(id="d" * 24, name="Cluster0")
+
+PROJECT_A = ProjectTarget(project_id=GROUP_A.id, project_name=GROUP_A.name)
 
 
 def _page(results: list[Any], total: int | None = None) -> SimpleNamespace:
     return SimpleNamespace(results=results, total_count=total)
 
 
-def _fake_client(groups: list[Any], clusters_by_group: dict[str, list[Any]]) -> SimpleNamespace:
-    def list_groups(**kwargs: Any) -> SimpleNamespace:
-        page = kwargs.get("page_num", 1)
-        size = kwargs.get("items_per_page", 100)
-        return _page(groups[(page - 1) * size : page * size], len(groups))
+def _fake_client(
+    clusters_by_group: dict[str, list[Any]], groups: tuple[Any, ...] = (GROUP_A,)
+) -> SimpleNamespace:
+    groups_by_id = {group.id: group for group in groups}
+
+    def get_group(group_id: str, **_: Any) -> Any:
+        if group_id not in groups_by_id:
+            raise AtlasApiError(404, "Not Found", {"detail": "no project"})
+        return groups_by_id[group_id]
 
     def list_group_clusters(group_id: str, **kwargs: Any) -> SimpleNamespace:
         clusters = clusters_by_group.get(group_id, [])
@@ -40,7 +47,7 @@ def _fake_client(groups: list[Any], clusters_by_group: dict[str, list[Any]]) -> 
         return _page(clusters[(page - 1) * size : page * size], len(clusters))
 
     return SimpleNamespace(
-        projects=SimpleNamespace(list_groups=list_groups),
+        projects=SimpleNamespace(get_group=get_group),
         clusters=SimpleNamespace(list_group_clusters=list_group_clusters),
     )
 
@@ -82,10 +89,33 @@ def test_client_from_env_reports_missing_credentials(environ: dict[str, str], mi
         client_from_env(environ)
 
 
-def test_find_clusters_by_name() -> None:
-    client = _fake_client([GROUP_A, GROUP_B], {GROUP_A.id: [CLUSTER_A], GROUP_B.id: []})
+def test_get_project_returns_name() -> None:
+    client = _fake_client({GROUP_A.id: []})
 
-    matches = find_clusters(client, "cluster0")
+    assert get_project(client, GROUP_A.id) == PROJECT_A
+
+
+def test_get_project_reports_missing_project() -> None:
+    client = _fake_client({})
+
+    with pytest.raises(AtlasOperationError, match="not found or is not accessible"):
+        get_project(client, "f" * 24)
+
+
+def test_get_project_propagates_other_errors() -> None:
+    def get_group(**_: Any) -> Any:
+        raise AtlasApiError(403, "Forbidden", None)
+
+    client = SimpleNamespace(projects=SimpleNamespace(get_group=get_group))
+
+    with pytest.raises(AtlasApiError):
+        get_project(client, GROUP_A.id)
+
+
+def test_find_clusters_by_name() -> None:
+    client = _fake_client({GROUP_A.id: [CLUSTER_A]})
+
+    matches = find_clusters(client, PROJECT_A, "cluster0")
 
     assert matches == [
         ClusterTarget(
@@ -98,63 +128,59 @@ def test_find_clusters_by_name() -> None:
 
 
 def test_find_clusters_by_id() -> None:
-    client = _fake_client([GROUP_A], {GROUP_A.id: [CLUSTER_A, CLUSTER_B]})
+    client = _fake_client({GROUP_A.id: [CLUSTER_A, CLUSTER_B]})
 
-    matches = find_clusters(client, CLUSTER_B.id.upper())
+    matches = find_clusters(client, PROJECT_A, CLUSTER_B.id.upper())
 
     assert [match.cluster_name for match in matches] == ["Cluster0"]
     assert matches[0].project_id == GROUP_A.id
 
 
 def test_find_clusters_falls_back_to_case_insensitive_name() -> None:
-    client = _fake_client([GROUP_A], {GROUP_A.id: [CLUSTER_A]})
+    client = _fake_client({GROUP_A.id: [CLUSTER_A]})
 
-    matches = find_clusters(client, "CLUSTER0")
+    matches = find_clusters(client, PROJECT_A, "CLUSTER0")
 
     assert [match.cluster_name for match in matches] == ["cluster0"]
 
 
 def test_exact_name_match_wins_over_case_insensitive_match() -> None:
-    client = _fake_client([GROUP_A], {GROUP_A.id: [CLUSTER_A, CLUSTER_B]})
+    client = _fake_client({GROUP_A.id: [CLUSTER_A, CLUSTER_B]})
 
-    matches = find_clusters(client, "cluster0")
+    matches = find_clusters(client, PROJECT_A, "cluster0")
 
     assert [match.cluster_name for match in matches] == ["cluster0"]
 
 
 def test_find_clusters_returns_all_duplicate_names() -> None:
-    client = _fake_client([GROUP_A, GROUP_B], {GROUP_A.id: [CLUSTER_A], GROUP_B.id: [CLUSTER_A]})
+    duplicate = SimpleNamespace(id="e" * 24, name="cluster0")
+    client = _fake_client({GROUP_A.id: [CLUSTER_A, duplicate]})
 
-    matches = find_clusters(client, "cluster0")
+    matches = find_clusters(client, PROJECT_A, "cluster0")
 
-    assert [match.project_name for match in matches] == ["Project A", "Project B"]
+    assert [match.cluster_id for match in matches] == [CLUSTER_A.id, duplicate.id]
 
 
 def test_find_clusters_returns_empty_when_nothing_matches() -> None:
-    client = _fake_client([GROUP_A], {GROUP_A.id: [CLUSTER_A]})
+    client = _fake_client({GROUP_A.id: [CLUSTER_A]})
 
-    assert find_clusters(client, "missing") == []
+    assert find_clusters(client, PROJECT_A, "missing") == []
 
 
-def test_find_clusters_paginates_projects_and_clusters() -> None:
-    groups = [SimpleNamespace(id=f"{index:024x}", name=f"Project {index}") for index in range(101)]
-    target_group = groups[-1]
-    target_cluster = SimpleNamespace(id="f" * 24, name="cluster0")
-    clusters_by_group = {group.id: [] for group in groups[:-1]}
-    clusters_by_group[target_group.id] = [
-        SimpleNamespace(id=f"{index:024x}", name=f"other-{index}") for index in range(100)
-    ] + [target_cluster]
+def test_find_clusters_paginates_clusters() -> None:
+    clusters = [SimpleNamespace(id=f"{index:024x}", name=f"other-{index}") for index in range(100)]
+    clusters.append(SimpleNamespace(id="f" * 24, name="cluster0"))
+    client = _fake_client({GROUP_A.id: clusters})
 
-    matches = find_clusters(_fake_client(groups, clusters_by_group), "cluster0")
+    matches = find_clusters(client, PROJECT_A, "cluster0")
 
     assert len(matches) == 1
-    assert matches[0].project_id == target_group.id
-    assert matches[0].cluster_id == target_cluster.id
+    assert matches[0].cluster_id == "f" * 24
 
 
 def test_find_clusters_rejects_empty_reference() -> None:
     with pytest.raises(AtlasOperationError, match="must not be empty"):
-        find_clusters(_fake_client([], {}), "  ")
+        find_clusters(_fake_client({}), PROJECT_A, "  ")
 
 
 def _cluster(payload: dict[str, Any]) -> ClusterDescription20240805:

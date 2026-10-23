@@ -1,0 +1,85 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "index: interactive (env / prompts)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "sie_atlas_ops",
+      "args": ["index", "${workspaceFolder}/examples/indexes"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "python": "${workspaceFolder}/.venv/bin/python"
+    },
+    {
+      "name": "index: directory + project + cluster",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "sie_atlas_ops",
+      "args": [
+        "index",
+        "${input:indexDirectory}",
+        "${input:projectId}",
+        "${input:clusterRef}"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "python": "${workspaceFolder}/.venv/bin/python"
+    },
+    {
+      "name": "pytest: current file",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": ["${file}", "-q"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "python": "${workspaceFolder}/.venv/bin/python"
+    },
+    {
+      "name": "version",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "sie_atlas_ops",
+      "args": ["version"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "python": "${workspaceFolder}/.venv/bin/python"
+    },
+    {
+      "name": "help",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "sie_atlas_ops",
+      "args": ["--help"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "python": "${workspaceFolder}/.venv/bin/python"
+    }
+  ],
+  "inputs": [
+    {
+      "id": "indexDirectory",
+      "type": "promptString",
+      "description": "Index definitions directory (relative to the workspace root)",
+      "default": "examples/indexes"
+    },
+    {
+      "id": "projectId",
+      "type": "promptString",
+      "description": "Project ID (leave empty to use ATLAS_PROJECT_ID or prompt)",
+      "default": ""
+    },
+    {
+      "id": "clusterRef",
+      "type": "promptString",
+      "description": "Cluster ID or name (leave empty to use ATLAS_CLUSTER_NAME or prompt)",
+      "default": ""
+    }
+  ]
+}

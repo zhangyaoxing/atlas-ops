@@ -17,13 +17,15 @@ if TYPE_CHECKING:
 
 PUBLIC_KEY_ENV = "ATLAS_PUBLIC_KEY"
 PRIVATE_KEY_ENV = "ATLAS_PRIVATE_KEY"
+PROJECT_ID_ENV = "ATLAS_PROJECT_ID"
+CLUSTER_NAME_ENV = "ATLAS_CLUSTER_NAME"
 
 _OBJECT_ID_PATTERN = re.compile(r"^[0-9a-fA-F]{24}$")
 _PAGE_SIZE = 100
 
 
 class _ProjectsAPI(Protocol):
-    def list_groups(self, **kwargs: Any) -> Any: ...
+    def get_group(self, group_id: str, **kwargs: Any) -> Any: ...
 
 
 class _ClustersAPI(Protocol):
@@ -37,6 +39,14 @@ class AtlasClientLike(Protocol):
 
     projects: _ProjectsAPI
     clusters: _ClustersAPI
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectTarget:
+    """An Atlas project resolved by ID."""
+
+    project_id: str
+    project_name: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,8 +88,23 @@ def client_from_env(environ: Mapping[str, str] | None = None) -> AtlasClient:
     )
 
 
-def find_clusters(client: AtlasClientLike, reference: str) -> list[ClusterTarget]:
-    """Find clusters by 24-hex ID or by name across every accessible project.
+def get_project(client: AtlasClientLike, project_id: str) -> ProjectTarget:
+    """Resolve *project_id* to its human-readable name."""
+    try:
+        group = client.projects.get_group(group_id=project_id)
+    except AtlasApiError as exc:
+        if exc.status_code == 404:
+            raise AtlasOperationError(
+                f"Project {project_id!r} was not found or is not accessible."
+            ) from exc
+        raise
+    return ProjectTarget(project_id=project_id, project_name=group.name)
+
+
+def find_clusters(
+    client: AtlasClientLike, project: ProjectTarget, reference: str
+) -> list[ClusterTarget]:
+    """Find clusters in *project* by 24-hex ID or by name.
 
     Names are matched exactly first; when that yields nothing, a
     case-insensitive match is attempted. Multiple matches are returned so the
@@ -93,25 +118,22 @@ def find_clusters(client: AtlasClientLike, reference: str) -> list[ClusterTarget
     exact: list[ClusterTarget] = []
     case_insensitive: list[ClusterTarget] = []
 
-    for group in _iter_groups(client):
-        if not group.id or not group.name:
+    for cluster in _iter_clusters(client, project.project_id):
+        if not cluster.name:
             continue
-        for cluster in _iter_clusters(client, group.id):
-            if not cluster.name:
-                continue
-            target = ClusterTarget(
-                project_id=group.id,
-                project_name=group.name,
-                cluster_id=cluster.id or "",
-                cluster_name=cluster.name,
-            )
-            if lookup_by_id:
-                if (cluster.id or "").lower() == reference.lower():
-                    exact.append(target)
-            elif cluster.name == reference:
+        target = ClusterTarget(
+            project_id=project.project_id,
+            project_name=project.project_name,
+            cluster_id=cluster.id or "",
+            cluster_name=cluster.name,
+        )
+        if lookup_by_id:
+            if (cluster.id or "").lower() == reference.lower():
                 exact.append(target)
-            elif cluster.name.lower() == reference.lower():
-                case_insensitive.append(target)
+        elif cluster.name == reference:
+            exact.append(target)
+        elif cluster.name.lower() == reference.lower():
+            case_insensitive.append(target)
 
     return exact or case_insensitive
 
@@ -158,20 +180,6 @@ def describe_atlas_error(exc: AtlasApiError) -> str:
         detail = exc.payload.strip()[:300]
     message = f"Atlas API request failed (HTTP {exc.status_code})"
     return f"{message}: {detail}" if detail else message
-
-
-def _iter_groups(client: AtlasClientLike) -> Iterator[Any]:
-    page_number = 1
-    seen = 0
-    while True:
-        page = client.projects.list_groups(items_per_page=_PAGE_SIZE, page_num=page_number)
-        results = list(page.results)
-        yield from results
-        seen += len(results)
-        total = getattr(page, "total_count", None)
-        if len(results) < _PAGE_SIZE or (total is not None and seen >= total):
-            return
-        page_number += 1
 
 
 def _iter_clusters(client: AtlasClientLike, group_id: str) -> Iterator[Any]:

@@ -17,7 +17,6 @@ from sie_atlas_ops.cli import app
 runner = CliRunner()
 
 GROUP_A = SimpleNamespace(id="a" * 24, name="Project A")
-GROUP_B = SimpleNamespace(id="c" * 24, name="Project B")
 CLUSTER = SimpleNamespace(id="b" * 24, name="cluster0")
 
 
@@ -28,18 +27,23 @@ class FakeAtlasClient:
         clusters_by_group: dict[str, list[Any]],
         detail: ClusterDescription20240805,
     ) -> None:
-        self._groups = groups
+        self._groups = {group.id: group for group in groups}
         self._clusters = clusters_by_group
         self._detail = detail
+        self.get_group_calls: list[str] = []
         self.get_cluster_calls: list[tuple[str, str]] = []
-        self.projects = SimpleNamespace(list_groups=self._list_groups)
+        self.projects = SimpleNamespace(get_group=self._get_group)
         self.clusters = SimpleNamespace(
             list_group_clusters=self._list_clusters,
             get_group_cluster=self._get_cluster,
         )
 
-    def _list_groups(self, **_: Any) -> SimpleNamespace:
-        return SimpleNamespace(results=self._groups, total_count=len(self._groups))
+    def _get_group(self, group_id: str, **_: Any) -> Any:
+        self.get_group_calls.append(group_id)
+        group = self._groups.get(group_id)
+        if group is None:
+            raise AtlasApiError(404, "Not Found", {"detail": "project not found"})
+        return group
 
     def _list_clusters(self, group_id: str, **_: Any) -> SimpleNamespace:
         clusters = self._clusters.get(group_id, [])
@@ -81,6 +85,11 @@ def _patch_client(monkeypatch: pytest.MonkeyPatch, client: FakeAtlasClient) -> N
     monkeypatch.setattr("sie_atlas_ops.cli.client_from_env", lambda: client)
 
 
+def _clear_target_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("ATLAS_PROJECT_ID", raising=False)
+    monkeypatch.delenv("ATLAS_CLUSTER_NAME", raising=False)
+
+
 def test_version_command() -> None:
     result = runner.invoke(app, ["version"])
     assert result.exit_code == 0
@@ -109,6 +118,7 @@ def test_index_help_documents_arguments() -> None:
     result = runner.invoke(app, ["index", "--help"])
     assert result.exit_code == 0
     assert "directory" in result.stdout
+    assert "project" in result.stdout
     assert "cluster" in result.stdout
 
 
@@ -121,13 +131,14 @@ def test_index_selects_connection_string(tmp_path: Path, monkeypatch: pytest.Mon
     )
     _patch_client(monkeypatch, client)
 
-    result = runner.invoke(app, ["index", str(tmp_path), "cluster0"], input="2\n")
+    result = runner.invoke(app, ["index", str(tmp_path), GROUP_A.id, "cluster0"], input="2\n")
 
     assert result.exit_code == 0, result.output
-    assert "mongodb+srv://srv" in result.output
+    assert 'Connection: "mongodb+srv://srv"' in result.output
     assert "Project A" in result.output
     assert "exampleDB.example" in result.output
     assert "Index creation is not implemented" in result.output
+    assert client.get_group_calls == [GROUP_A.id]
     assert client.get_cluster_calls == [("cluster0", GROUP_A.id)]
 
 
@@ -136,10 +147,151 @@ def test_index_accepts_cluster_id(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail(standard="mongodb://only"))
     _patch_client(monkeypatch, client)
 
-    result = runner.invoke(app, ["index", str(tmp_path), CLUSTER.id])
+    result = runner.invoke(app, ["index", str(tmp_path), GROUP_A.id, CLUSTER.id])
 
     assert result.exit_code == 0, result.output
     assert "mongodb://only" in result.output
+
+
+def test_index_uses_environment_fallbacks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _write_definitions(tmp_path)
+    client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail(standard="mongodb://only"))
+    _patch_client(monkeypatch, client)
+    monkeypatch.setenv("ATLAS_PROJECT_ID", GROUP_A.id)
+    monkeypatch.setenv("ATLAS_CLUSTER_NAME", "cluster0")
+
+    result = runner.invoke(app, ["index", str(tmp_path)])
+
+    assert result.exit_code == 0, result.output
+    assert client.get_group_calls == [GROUP_A.id]
+    assert "mongodb://only" in result.output
+
+
+def test_index_empty_positionals_fall_back_to_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_definitions(tmp_path)
+    client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail(standard="mongodb://only"))
+    _patch_client(monkeypatch, client)
+    monkeypatch.setenv("ATLAS_PROJECT_ID", GROUP_A.id)
+    monkeypatch.setenv("ATLAS_CLUSTER_NAME", "cluster0")
+
+    result = runner.invoke(app, ["index", str(tmp_path), "", ""])
+
+    assert result.exit_code == 0, result.output
+    assert client.get_group_calls == [GROUP_A.id]
+
+
+def test_index_single_positional_is_treated_as_cluster(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_definitions(tmp_path)
+    client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail(standard="mongodb://only"))
+    _patch_client(monkeypatch, client)
+    monkeypatch.setenv("ATLAS_PROJECT_ID", GROUP_A.id)
+    monkeypatch.delenv("ATLAS_CLUSTER_NAME", raising=False)
+
+    result = runner.invoke(app, ["index", str(tmp_path), "cluster0"])
+
+    assert result.exit_code == 0, result.output
+    assert client.get_group_calls == [GROUP_A.id]
+
+
+def test_index_single_cluster_id_with_env_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_definitions(tmp_path)
+    client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail(standard="mongodb://only"))
+    _patch_client(monkeypatch, client)
+    monkeypatch.setenv("ATLAS_PROJECT_ID", GROUP_A.id)
+    monkeypatch.delenv("ATLAS_CLUSTER_NAME", raising=False)
+
+    result = runner.invoke(app, ["index", str(tmp_path), CLUSTER.id])
+
+    assert result.exit_code == 0, result.output
+    assert client.get_group_calls == [GROUP_A.id]
+    assert client.get_cluster_calls == [("cluster0", GROUP_A.id)]
+
+
+def test_index_single_project_id_with_env_cluster(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_definitions(tmp_path)
+    client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail(standard="mongodb://only"))
+    _patch_client(monkeypatch, client)
+    monkeypatch.setenv("ATLAS_CLUSTER_NAME", "cluster0")
+    monkeypatch.delenv("ATLAS_PROJECT_ID", raising=False)
+
+    result = runner.invoke(app, ["index", str(tmp_path), GROUP_A.id])
+
+    assert result.exit_code == 0, result.output
+    assert client.get_group_calls == [GROUP_A.id]
+
+
+def test_index_prompts_for_missing_project_and_cluster(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_definitions(tmp_path)
+    client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail(standard="mongodb://only"))
+    _patch_client(monkeypatch, client)
+    _clear_target_env(monkeypatch)
+
+    result = runner.invoke(
+        app,
+        ["index", str(tmp_path)],
+        input=f"{GROUP_A.id}\ncluster0\n",
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Project ID (24 hexadecimal characters)" in result.output
+    assert "Cluster ID or name" in result.output
+    assert client.get_group_calls == [GROUP_A.id]
+
+
+def test_index_reprompts_for_invalid_project_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_definitions(tmp_path)
+    client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail(standard="mongodb://only"))
+    _patch_client(monkeypatch, client)
+    _clear_target_env(monkeypatch)
+
+    result = runner.invoke(
+        app,
+        ["index", str(tmp_path)],
+        input=f"not-an-id\n{GROUP_A.id}\ncluster0\n",
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Project ID must be 24 hexadecimal characters." in result.output
+    assert client.get_group_calls == [GROUP_A.id]
+
+
+def test_index_rejects_invalid_project_id_from_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_definitions(tmp_path)
+    client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail(standard="mongodb://only"))
+    _patch_client(monkeypatch, client)
+    monkeypatch.setenv("ATLAS_PROJECT_ID", "not-an-id")
+    monkeypatch.setenv("ATLAS_CLUSTER_NAME", "cluster0")
+
+    result = runner.invoke(app, ["index", str(tmp_path)])
+
+    assert result.exit_code == 1
+    assert "Invalid project ID" in result.output
+    assert client.get_group_calls == []
+
+
+def test_index_reports_project_not_found(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _write_definitions(tmp_path)
+    client = FakeAtlasClient([], {}, _detail(standard="mongodb://only"))
+    _patch_client(monkeypatch, client)
+
+    result = runner.invoke(app, ["index", str(tmp_path), GROUP_A.id, "cluster0"])
+
+    assert result.exit_code == 1
+    assert "not found or is not accessible" in result.output
 
 
 def test_index_auto_selects_single_connection_string(
@@ -149,7 +301,7 @@ def test_index_auto_selects_single_connection_string(
     client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail(standard="mongodb://only"))
     _patch_client(monkeypatch, client)
 
-    result = runner.invoke(app, ["index", str(tmp_path), "cluster0"], input="")
+    result = runner.invoke(app, ["index", str(tmp_path), GROUP_A.id, "cluster0"], input="")
 
     assert result.exit_code == 0, result.output
     assert "Available connection strings" not in result.output
@@ -160,18 +312,19 @@ def test_index_asks_when_multiple_clusters_match(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _write_definitions(tmp_path)
+    duplicate = SimpleNamespace(id="e" * 24, name="cluster0")
     client = FakeAtlasClient(
-        [GROUP_A, GROUP_B],
-        {GROUP_A.id: [CLUSTER], GROUP_B.id: [CLUSTER]},
+        [GROUP_A],
+        {GROUP_A.id: [CLUSTER, duplicate]},
         _detail(standard="mongodb://only"),
     )
     _patch_client(monkeypatch, client)
 
-    result = runner.invoke(app, ["index", str(tmp_path), "cluster0"], input="2\n")
+    result = runner.invoke(app, ["index", str(tmp_path), GROUP_A.id, "cluster0"], input="2\n")
 
     assert result.exit_code == 0, result.output
     assert "Multiple clusters match" in result.output
-    assert client.get_cluster_calls == [("cluster0", GROUP_B.id)]
+    assert client.get_cluster_calls == [("cluster0", GROUP_A.id)]
 
 
 def test_index_reprompts_on_invalid_selection(
@@ -185,7 +338,7 @@ def test_index_reprompts_on_invalid_selection(
     )
     _patch_client(monkeypatch, client)
 
-    result = runner.invoke(app, ["index", str(tmp_path), "cluster0"], input="9\n2\n")
+    result = runner.invoke(app, ["index", str(tmp_path), GROUP_A.id, "cluster0"], input="9\n2\n")
 
     assert result.exit_code == 0, result.output
     assert "Enter a number between 1 and 2" in result.output
@@ -196,12 +349,14 @@ def test_index_reports_missing_credentials(tmp_path: Path, monkeypatch: pytest.M
     _write_definitions(tmp_path)
     monkeypatch.delenv("ATLAS_PUBLIC_KEY", raising=False)
     monkeypatch.delenv("ATLAS_PRIVATE_KEY", raising=False)
+    _clear_target_env(monkeypatch)
 
-    result = runner.invoke(app, ["index", str(tmp_path), "cluster0"])
+    result = runner.invoke(app, ["index", str(tmp_path)])
 
     assert result.exit_code == 1
     assert "ATLAS_PUBLIC_KEY" in result.output
     assert "ATLAS_PRIVATE_KEY" in result.output
+    assert "Project ID (24 hexadecimal characters)" not in result.output
 
 
 def test_index_validates_definitions_before_calling_atlas(
@@ -217,7 +372,7 @@ def test_index_validates_definitions_before_calling_atlas(
         lambda: called.append(True) or pytest.fail("Atlas client must not be created"),
     )
 
-    result = runner.invoke(app, ["index", str(tmp_path), "cluster0"])
+    result = runner.invoke(app, ["index", str(tmp_path)])
 
     assert result.exit_code == 1
     assert "keys" in result.output
@@ -231,7 +386,7 @@ def test_index_reports_empty_directory(tmp_path: Path, monkeypatch: pytest.Monke
         lambda: called.append(True) or pytest.fail("Atlas client must not be created"),
     )
 
-    result = runner.invoke(app, ["index", str(tmp_path), "cluster0"])
+    result = runner.invoke(app, ["index", str(tmp_path)])
 
     assert result.exit_code == 1
     assert "No .json files found" in result.output
@@ -243,7 +398,7 @@ def test_index_reports_unknown_cluster(tmp_path: Path, monkeypatch: pytest.Monke
     client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail(standard="mongodb://x"))
     _patch_client(monkeypatch, client)
 
-    result = runner.invoke(app, ["index", str(tmp_path), "missing"])
+    result = runner.invoke(app, ["index", str(tmp_path), GROUP_A.id, "missing"])
 
     assert result.exit_code == 1
     assert "No cluster found for 'missing'" in result.output
@@ -256,7 +411,7 @@ def test_index_reports_cluster_without_connection_strings(
     client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail())
     _patch_client(monkeypatch, client)
 
-    result = runner.invoke(app, ["index", str(tmp_path), "cluster0"])
+    result = runner.invoke(app, ["index", str(tmp_path), GROUP_A.id, "cluster0"])
 
     assert result.exit_code == 1
     assert "no connection strings" in result.output
@@ -266,13 +421,13 @@ def test_index_reports_atlas_api_errors(tmp_path: Path, monkeypatch: pytest.Monk
     _write_definitions(tmp_path)
 
     class FailingClient(FakeAtlasClient):
-        def _list_groups(self, **_: Any) -> SimpleNamespace:
+        def _get_group(self, group_id: str, **_: Any) -> Any:
             raise AtlasApiError(401, "Unauthorized", {"detail": "invalid credentials"})
 
     client = FailingClient([], {}, _detail(standard="mongodb://x"))
     _patch_client(monkeypatch, client)
 
-    result = runner.invoke(app, ["index", str(tmp_path), "cluster0"])
+    result = runner.invoke(app, ["index", str(tmp_path), GROUP_A.id, "cluster0"])
 
     assert result.exit_code == 1
     assert "HTTP 401" in result.output
@@ -280,7 +435,7 @@ def test_index_reports_atlas_api_errors(tmp_path: Path, monkeypatch: pytest.Monk
 
 
 def test_index_rejects_missing_directory(tmp_path: Path) -> None:
-    result = runner.invoke(app, ["index", str(tmp_path / "missing"), "cluster0"])
+    result = runner.invoke(app, ["index", str(tmp_path / "missing"), GROUP_A.id, "cluster0"])
 
     assert result.exit_code == 2
     assert "does not exist" in result.output
@@ -309,19 +464,24 @@ def test_index_logs_found_cluster_and_connection_strings(
     package_logger = logging.getLogger("sie_atlas_ops")
     package_logger.addHandler(handler)
     try:
-        result = runner.invoke(app, ["index", str(tmp_path), "cluster0"], input="2\n")
+        result = runner.invoke(
+            app,
+            ["index", str(tmp_path), GROUP_A.id, "cluster0"],
+            input="2\n",
+        )
     finally:
         package_logger.removeHandler(handler)
 
     assert result.exit_code == 0, result.output
     assert any("Found cluster [green]cluster0[/green]" in message for message in handler.messages)
+    assert any("in project [green]Project A[/green]" in message for message in handler.messages)
     assert any("by name" in message for message in handler.messages)
     assert any("Found 2 connection string(s)" in message for message in handler.messages)
     assert any(
-        "standard_srv" in message and "mongodb+srv://srv" in message for message in handler.messages
+        '[cyan]standard_srv[/cyan]: "mongodb+srv://srv"' in message for message in handler.messages
     )
     assert any(
-        "Selected connection string [cyan]standard_srv[/cyan]" in message
+        'Selected connection string [cyan]standard_srv[/cyan]: "mongodb+srv://srv"' in message
         for message in handler.messages
     )
 
@@ -334,9 +494,36 @@ def test_index_logs_lookup_by_id(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     package_logger = logging.getLogger("sie_atlas_ops")
     package_logger.addHandler(handler)
     try:
-        result = runner.invoke(app, ["index", str(tmp_path), CLUSTER.id])
+        result = runner.invoke(app, ["index", str(tmp_path), GROUP_A.id, CLUSTER.id])
     finally:
         package_logger.removeHandler(handler)
 
     assert result.exit_code == 0, result.output
     assert any("by ID" in message for message in handler.messages)
+
+
+def test_index_logs_when_values_come_from_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_definitions(tmp_path)
+    client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail(standard="mongodb://only"))
+    _patch_client(monkeypatch, client)
+    monkeypatch.setenv("ATLAS_PROJECT_ID", GROUP_A.id)
+    monkeypatch.setenv("ATLAS_CLUSTER_NAME", "cluster0")
+    handler = _CaptureHandler()
+    package_logger = logging.getLogger("sie_atlas_ops")
+    package_logger.addHandler(handler)
+    try:
+        result = runner.invoke(app, ["index", str(tmp_path)])
+    finally:
+        package_logger.removeHandler(handler)
+
+    assert result.exit_code == 0, result.output
+    assert any(
+        f"Using project {GROUP_A.id} from ATLAS_PROJECT_ID" in message
+        for message in handler.messages
+    )
+    assert any(
+        "Using cluster [green]cluster0[/green] from ATLAS_CLUSTER_NAME" in message
+        for message in handler.messages
+    )
