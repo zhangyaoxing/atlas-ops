@@ -42,6 +42,7 @@ from sie_atlas_ops.atlas import (
 )
 from sie_atlas_ops.env import load_env
 from sie_atlas_ops.errors import AtlasOperationError, OpsError
+from sie_atlas_ops.index.create import CreateResult, create_indexes
 from sie_atlas_ops.index.definitions import CollectionIndexes, load_index_definitions
 from sie_atlas_ops.index.mongo import (
     MissingNamespace,
@@ -126,8 +127,8 @@ def index(
     is selected interactively. A cluster-scoped temporary database user is then
     created and expires after six hours; the command waits for that user to
     become active. Missing databases and collections are reported and confirmed,
-    and existing indexes are compared by key pattern and options. Creating the
-    indexes is not implemented yet.
+    existing indexes are compared by key pattern and options, and the remaining
+    indexes are created.
     """
     try:
         definitions = load_index_definitions(directory)
@@ -180,10 +181,15 @@ def index(
                     typer.echo("Aborted.")
                     raise typer.Exit(code=1)
             plan = plan_indexes(mongo_client, definitions, missing)
+            _log_index_plan(plan)
+            pending = sum(1 for item in plan if item.action is IndexAction.CREATE)
+            if pending:
+                logger.info("Creating %d index(es)...", pending)
+            created = create_indexes(mongo_client, plan)
         finally:
             mongo_client.close()
 
-        _log_index_plan(plan)
+        _log_created(created)
     except OpsError as exc:
         _fail(str(exc))
     except AtlasApiError as exc:
@@ -193,7 +199,14 @@ def index(
     except httpx.HTTPError as exc:
         _fail(f"Could not reach the Atlas API: {exc}")
 
-    _print_summary(directory, definitions, target, selected, temporary_user)
+    _print_summary(
+        directory,
+        definitions,
+        target,
+        selected,
+        temporary_user,
+        sum(len(result.names) for result in created),
+    )
 
 
 def _resolve_references(project: str | None, cluster: str | None) -> tuple[str, str]:
@@ -292,6 +305,20 @@ def _log_index_plan(plan: list[IndexPlanItem]) -> None:
             )
 
 
+def _log_created(created: list[CreateResult]) -> None:
+    if not created:
+        logger.info("No indexes need to be created.")
+        return
+    for result in created:
+        logger.info(
+            'Created %d index(es) on "%s.%s": %s',
+            len(result.names),
+            escape(result.database),
+            escape(result.collection),
+            escape(", ".join(result.names)),
+        )
+
+
 def _prompt_project() -> str:
     while True:
         value = typer.prompt("Project ID (24 hexadecimal characters)").strip()
@@ -371,6 +398,7 @@ def _print_summary(
     target: ClusterTarget,
     selected: ConnectionOption,
     temporary_user: TemporaryUser,
+    created_count: int,
 ) -> None:
     typer.echo("")
     typer.echo(f"Cluster:    {target.cluster_name} ({target.cluster_id or 'unknown ID'})")
@@ -389,7 +417,10 @@ def _print_summary(
             f"{len(definition.indexes)} index(es) ({definition.path.name})"
         )
     typer.echo("")
-    typer.echo("Index creation is not implemented yet.")
+    if created_count:
+        typer.echo(f"Index creation complete: {created_count} index(es) created.")
+    else:
+        typer.echo("Index creation complete: no new indexes.")
 
 
 def _format_utc(value: datetime) -> str:

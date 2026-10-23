@@ -89,16 +89,22 @@ class FakeMongoDatabase:
         collections: list[str],
         indexes: dict[tuple[str, str], list[dict[str, Any]]],
         database: str,
+        commands: list[dict[str, Any]],
     ) -> None:
         self._collections = collections
         self._indexes = indexes
         self._database = database
+        self._commands = commands
 
     def list_collection_names(self) -> list[str]:
         return list(self._collections)
 
     def __getitem__(self, collection: str) -> FakeMongoCollection:
         return FakeMongoCollection(self._indexes.get((self._database, collection), []))
+
+    def command(self, command: dict[str, Any]) -> dict[str, Any]:
+        self._commands.append(command)
+        return {"ok": 1}
 
 
 class FakeMongoClient:
@@ -109,13 +115,19 @@ class FakeMongoClient:
     ) -> None:
         self._databases = databases
         self._indexes = indexes or {}
+        self.commands: list[dict[str, Any]] = []
         self.closed = False
 
     def list_database_names(self) -> list[str]:
         return list(self._databases)
 
     def __getitem__(self, database: str) -> FakeMongoDatabase:
-        return FakeMongoDatabase(self._databases.get(database, []), self._indexes, database)
+        return FakeMongoDatabase(
+            self._databases.get(database, []),
+            self._indexes,
+            database,
+            self.commands,
+        )
 
     def close(self) -> None:
         self.closed = True
@@ -206,7 +218,7 @@ def test_index_selects_connection_string(tmp_path: Path, monkeypatch: pytest.Mon
     assert 'Connection: "mongodb+srv://srv"' in result.output
     assert "Project A" in result.output
     assert "exampleDB.example" in result.output
-    assert "Index creation is not implemented" in result.output
+    assert "Index creation complete: 1 index(es) created." in result.output
     assert client.get_group_calls == [GROUP_A.id]
     assert client.get_cluster_calls == [("cluster0", GROUP_A.id)]
 
@@ -238,6 +250,48 @@ def test_index_creates_temporary_user(tmp_path: Path, monkeypatch: pytest.Monkey
     assert "Expires:" in result.output
 
 
+def test_index_creates_pending_indexes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mongo: SimpleNamespace
+) -> None:
+    _write_definitions(tmp_path)
+    client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail(standard="mongodb://only"))
+    _patch_client(monkeypatch, client)
+
+    result = runner.invoke(app, ["index", str(tmp_path), GROUP_A.id, "cluster0"])
+
+    assert result.exit_code == 0, result.output
+    assert mongo.client.commands == [
+        {
+            "createIndexes": "example",
+            "indexes": [{"name": "field_index", "key": {"field": 1}}],
+        }
+    ]
+    assert "Index creation complete: 1 index(es) created." in result.output
+
+
+def test_index_creation_honours_commit_quorum(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mongo: SimpleNamespace
+) -> None:
+    (tmp_path / "indexes.json").write_text(
+        json.dumps(
+            {
+                "database": "exampleDB",
+                "collection": "example",
+                "indexes": [{"keys": {"field": 1}, "commitQuorum": "majority"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail(standard="mongodb://only"))
+    _patch_client(monkeypatch, client)
+
+    result = runner.invoke(app, ["index", str(tmp_path), GROUP_A.id, "cluster0"])
+
+    assert result.exit_code == 0, result.output
+    assert mongo.client.commands[0]["commitQuorum"] == "majority"
+    assert "commitQuorum" not in mongo.client.commands[0]["indexes"][0]
+
+
 def test_index_prompts_when_collection_missing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -252,7 +306,7 @@ def test_index_prompts_when_collection_missing(
     assert result.exit_code == 0, result.output
     assert 'Collection "exampleDB.example" does not exist.' in result.output
     assert "Continue and let MongoDB create" in result.output
-    assert "Index creation is not implemented" in result.output
+    assert "Index creation complete: 1 index(es) created." in result.output
 
 
 def test_index_prompts_when_database_missing(
@@ -284,7 +338,7 @@ def test_index_aborts_when_missing_namespace_declined(
 
     assert result.exit_code == 1
     assert "Aborted." in result.output
-    assert "Index creation is not implemented" not in result.output
+    assert "Index creation complete" not in result.output
 
 
 def test_index_connects_with_temporary_credentials(
@@ -344,6 +398,7 @@ def test_index_skips_identical_existing_index(
         for message in handler.messages
     )
     assert not any("different options" in message for message in handler.messages)
+    assert mongo_client.commands == []
 
 
 def test_index_warns_about_existing_index_with_different_options(
@@ -375,6 +430,7 @@ def test_index_warns_about_existing_index_with_different_options(
     assert "other_index" in warning
     assert "skipping" in warning
     assert not any("identical options" in message for message in handler.messages)
+    assert mongo_client.commands == []
 
 
 def test_index_accepts_cluster_id(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

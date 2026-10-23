@@ -108,10 +108,13 @@ JSON 格式：
 9. 按 `keys` 的有序字段组合（不看索引名）匹配已有索引：
    - `options` 完全一致 → 输出一条 INFO 并跳过
    - `options` 不一致 → 输出 WARNING（含已有索引名和双方 options）并跳过
-10. 输出集群、项目、临时用户凭据和已加载的索引定义摘要
+10. 对需要创建的索引执行 `createIndexes`：按 `(database, collection, commitQuorum)`
+    分批，每批发一条命令；索引名取 options 里的 `name`，没有则按 MongoDB 规则生成
+    （如 `a_1_b_-1`）；`commitQuorum` 放在命令级
+11. 输出集群、项目、临时用户凭据和已加载的索引定义摘要
 
-命令在索引检查后结束，实际创建索引尚未实现。创建数据库用户需要 Atlas API Key
-具备相应权限（例如 Project Owner 或 Project Database Access Admin）。
+命令在创建索引后结束。创建数据库用户需要 Atlas API Key 具备相应权限
+（例如 Project Owner 或 Project Database Access Admin）。
 
 比较 options 时会排除服务端字段 `v`、`key`；如果定义里没有写 `name`，已有索引的自动生成名也不会参与比较。
 
@@ -194,6 +197,7 @@ source .venv/bin/activate
 │       ├── env.py                    # .env 加载（向上查找，不覆盖已有变量）
 │       ├── index/
 │       │   ├── __init__.py
+│       │   ├── create.py             # createIndexes 分批创建
 │       │   ├── definitions.py        # 索引定义 JSON 的加载与校验
 │       │   ├── mongo.py              # MongoDB 连接、认证 URI、库/集合检查
 │       │   └── plan.py               # 按 keys/options 判断索引是否已存在
@@ -202,6 +206,7 @@ source .venv/bin/activate
 └── tests/
     ├── conftest.py                   # 隔离工作目录，避免读到真实 .env
     ├── index/
+    │   ├── test_create.py            # createIndexes 分组与命令构造测试
     │   ├── test_definitions.py       # 定义文件校验测试
     │   ├── test_mongo.py             # MongoDB URI 与存在性检查测试
     │   └── test_plan.py              # 索引存在性/选项比较测试
@@ -220,8 +225,6 @@ pyatlassdk = { path = "../mongo-atlas-sdk/pyatlassdk", editable = true }
 ```
 
 仓库布局不同时改这一行即可。SDK 发布到 PyPI 后可以换成版本号。
-
-注意：`pyatlassdk` 生成的资源路径以 `/api/atlas/v2` 开头，而它当前的默认 `base_url` 也包含该前缀，直接使用默认值会产生重复路径，需要在 `pyatlassdk` 侧把默认值改为仅主机名。
 
 ## 添加新命令
 
