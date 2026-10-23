@@ -48,6 +48,7 @@ from sie_atlas_ops.env import load_env
 from sie_atlas_ops.errors import AtlasOperationError, ConfigurationError, OpsError
 from sie_atlas_ops.index.create import CreateResult, create_indexes
 from sie_atlas_ops.index.definitions import CollectionIndexes, load_index_definitions
+from sie_atlas_ops.index.drop import DroppedIndex, drop_indexes
 from sie_atlas_ops.index.mongo import (
     MissingNamespace,
     MongoClientLike,
@@ -56,7 +57,12 @@ from sie_atlas_ops.index.mongo import (
     find_missing_namespaces,
     wait_for_user,
 )
-from sie_atlas_ops.index.plan import IndexAction, IndexPlanItem, plan_indexes
+from sie_atlas_ops.index.plan import (
+    ExtraIndex,
+    IndexAction,
+    IndexPlanItem,
+    plan_indexes,
+)
 from sie_atlas_ops.log import configure_logging
 
 logger = logging.getLogger(__name__)
@@ -157,6 +163,8 @@ def index(
     expires after six hours, and is deleted on every exit path. Missing
     databases and collections are reported and confirmed, existing indexes are
     compared by key pattern and options, and the remaining indexes are created.
+    Existing indexes whose key pattern is not declared are reported and, on
+    confirmation, dropped.
     """
     try:
         definitions = load_index_definitions(directory)
@@ -224,15 +232,29 @@ def index(
                             typer.echo("Aborted.")
                             raise typer.Exit(code=1)
                     plan = plan_indexes(mongo_client, definitions, missing)
-                    _log_index_plan(plan)
-                    pending = sum(1 for item in plan if item.action is IndexAction.CREATE)
+                    _log_index_plan(plan.items)
+                    delete_extras = False
+                    if plan.extras:
+                        _log_extra_indexes(plan.extras)
+                        delete_extras = typer.confirm(
+                            f"Delete the {len(plan.extras)} index(es) that are "
+                            "not present in the definitions?",
+                            default=False,
+                        )
+                        if not delete_extras:
+                            logger.info("Skipping deletion of undefined indexes.")
+                    pending = sum(1 for item in plan.items if item.action is IndexAction.CREATE)
                     if pending:
                         logger.info("Creating %d index(es)...", pending)
-                    created = create_indexes(mongo_client, plan)
+                    created = create_indexes(mongo_client, plan.items)
+                    dropped: list[DroppedIndex] = []
+                    if delete_extras:
+                        dropped = drop_indexes(mongo_client, list(plan.extras))
                 finally:
                     mongo_client.close()
 
                 _log_created(created)
+                _log_dropped(dropped)
             finally:
                 if temporary_user is not None:
                     _delete_temporary_user(client, project_id, temporary_user)
@@ -251,6 +273,7 @@ def index(
         target,
         selected,
         sum(len(result.names) for result in created),
+        len(dropped),
     )
 
 
@@ -366,6 +389,27 @@ def _log_created(created: list[CreateResult]) -> None:
         )
 
 
+def _log_extra_indexes(extras: tuple[ExtraIndex, ...]) -> None:
+    for extra in extras:
+        logger.warning(
+            'Index "%s" on "%s.%s" is not present in the definitions (keys %s).',
+            escape(extra.name),
+            escape(extra.database),
+            escape(extra.collection),
+            escape(json.dumps(extra.keys)),
+        )
+
+
+def _log_dropped(dropped: list[DroppedIndex]) -> None:
+    for item in dropped:
+        logger.info(
+            'Dropped index "%s" on "%s.%s".',
+            escape(item.name),
+            escape(item.database),
+            escape(item.collection),
+        )
+
+
 def _delete_temporary_user(
     client: AtlasClientLike, project_id: str, temporary_user: TemporaryUser
 ) -> None:
@@ -461,6 +505,7 @@ def _print_summary(
     target: ClusterTarget,
     selected: ConnectionOption,
     created_count: int,
+    deleted_count: int,
 ) -> None:
     typer.echo("")
     typer.echo(f"Cluster:    {target.cluster_name} ({target.cluster_id or 'unknown ID'})")
@@ -479,6 +524,8 @@ def _print_summary(
         typer.echo(f"Index creation complete: {created_count} index(es) created.")
     else:
         typer.echo("Index creation complete: no new indexes.")
+    if deleted_count:
+        typer.echo(f"Index deletion complete: {deleted_count} index(es) deleted.")
 
 
 def _format_utc(value: datetime) -> str:

@@ -59,7 +59,7 @@ def test_creates_index_when_no_keys_match() -> None:
 
     plan = plan_indexes(client, [_definition(_spec({"field": 1}))], [])
 
-    assert [item.action for item in plan] == [IndexAction.CREATE]
+    assert [item.action for item in plan.items] == [IndexAction.CREATE]
 
 
 def test_identical_when_keys_and_options_match() -> None:
@@ -84,8 +84,8 @@ def test_identical_when_keys_and_options_match() -> None:
         [],
     )
 
-    assert plan[0].action is IndexAction.IDENTICAL
-    assert plan[0].existing_name == "field_index"
+    assert plan.items[0].action is IndexAction.IDENTICAL
+    assert plan.items[0].existing_name == "field_index"
 
 
 def test_identical_ignores_generated_name_when_not_requested() -> None:
@@ -95,8 +95,8 @@ def test_identical_ignores_generated_name_when_not_requested() -> None:
 
     plan = plan_indexes(client, [_definition(_spec({"field": 1}))], [])
 
-    assert plan[0].action is IndexAction.IDENTICAL
-    assert plan[0].existing_options == {}
+    assert plan.items[0].action is IndexAction.IDENTICAL
+    assert plan.items[0].existing_options == {}
 
 
 def test_different_when_options_differ() -> None:
@@ -110,9 +110,9 @@ def test_different_when_options_differ() -> None:
 
     plan = plan_indexes(client, [_definition(_spec({"field": 1}, {"name": "field_index"}))], [])
 
-    assert plan[0].action is IndexAction.DIFFERENT
-    assert plan[0].existing_name == "other_index"
-    assert plan[0].existing_options == {"name": "other_index", "unique": True}
+    assert plan.items[0].action is IndexAction.DIFFERENT
+    assert plan.items[0].existing_name == "other_index"
+    assert plan.items[0].existing_options == {"name": "other_index", "unique": True}
 
 
 def test_different_when_requested_name_differs() -> None:
@@ -122,7 +122,7 @@ def test_different_when_requested_name_differs() -> None:
 
     plan = plan_indexes(client, [_definition(_spec({"field": 1}, {"name": "field_index"}))], [])
 
-    assert plan[0].action is IndexAction.DIFFERENT
+    assert plan.items[0].action is IndexAction.DIFFERENT
 
 
 def test_key_order_must_match() -> None:
@@ -132,7 +132,7 @@ def test_key_order_must_match() -> None:
 
     plan = plan_indexes(client, [_definition(_spec({"a": 1, "b": 1}))], [])
 
-    assert plan[0].action is IndexAction.CREATE
+    assert plan.items[0].action is IndexAction.CREATE
 
 
 def test_missing_namespace_is_created_without_listing() -> None:
@@ -140,7 +140,7 @@ def test_missing_namespace_is_created_without_listing() -> None:
 
     plan = plan_indexes(ExplodingClient(), [_definition(_spec({"field": 1}))], missing)
 
-    assert [item.action for item in plan] == [IndexAction.CREATE]
+    assert [item.action for item in plan.items] == [IndexAction.CREATE]
 
 
 def test_plan_preserves_definition_order() -> None:
@@ -158,12 +158,12 @@ def test_plan_preserves_definition_order() -> None:
 
     plan = plan_indexes(client, [definition], [])
 
-    assert [item.spec.keys for item in plan] == [
+    assert [item.spec.keys for item in plan.items] == [
         {"a": 1},
         {"b": 1},
         {"c": 1},
     ]
-    assert [item.action for item in plan] == [
+    assert [item.action for item in plan.items] == [
         IndexAction.IDENTICAL,
         IndexAction.CREATE,
         IndexAction.CREATE,
@@ -184,4 +184,45 @@ def test_identical_candidate_wins_over_different_candidate() -> None:
 
     plan = plan_indexes(client, [_definition(_spec({"field": 1}, {"name": "same"}))], [])
 
-    assert plan[0].action is IndexAction.IDENTICAL
+    assert plan.items[0].action is IndexAction.IDENTICAL
+
+
+def test_reports_extra_indexes_but_not_declared_or_id() -> None:
+    client = FakeClient(
+        {
+            "exampleDB": {
+                "example": [
+                    {"v": 2, "key": {"_id": 1}, "name": "_id_"},
+                    {"v": 2, "key": {"field": 1}, "name": "field_1"},
+                    {"v": 2, "key": {"extra": 1}, "name": "extra_1"},
+                ]
+            }
+        }
+    )
+
+    plan = plan_indexes(client, [_definition(_spec({"field": 1}))], [])
+
+    assert [(extra.name, extra.keys) for extra in plan.extras] == [("extra_1", {"extra": 1})]
+
+
+def test_different_options_index_is_not_reported_as_extra() -> None:
+    client = FakeClient(
+        {
+            "exampleDB": {
+                "example": [{"v": 2, "key": {"field": 1}, "name": "field_1", "unique": True}]
+            }
+        }
+    )
+
+    plan = plan_indexes(client, [_definition(_spec({"field": 1}))], [])
+
+    assert plan.items[0].action is IndexAction.DIFFERENT
+    assert plan.extras == ()
+
+
+def test_missing_namespace_has_no_extra_indexes() -> None:
+    missing = [MissingNamespace(database="exampleDB", collection="example", database_exists=False)]
+
+    plan = plan_indexes(ExplodingClient(), [_definition(_spec({"field": 1}))], missing)
+
+    assert plan.extras == ()

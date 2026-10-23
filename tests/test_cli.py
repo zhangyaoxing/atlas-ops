@@ -421,6 +421,121 @@ def test_index_creation_honours_commit_quorum(
     assert "commitQuorum" not in mongo.client.commands[0]["indexes"][0]
 
 
+def test_index_prompts_to_delete_extra_indexes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_definitions(tmp_path)
+    client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail(standard="mongodb://only"))
+    _patch_client(monkeypatch, client)
+    existing = [
+        {"v": 2, "key": {"_id": 1}, "name": "_id_"},
+        {"v": 2, "key": {"field": 1}, "name": "field_index"},
+        {"v": 2, "key": {"extra": 1}, "name": "extra_1"},
+    ]
+    mongo_client = FakeMongoClient({"exampleDB": ["example"]}, {("exampleDB", "example"): existing})
+    monkeypatch.setattr("sie_atlas_ops.cli.create_client", lambda uri: mongo_client)
+    handler = _CaptureHandler()
+    package_logger = logging.getLogger("sie_atlas_ops")
+    package_logger.addHandler(handler)
+    try:
+        result = runner.invoke(
+            app,
+            [
+                "index",
+                str(tmp_path),
+                "--project-id",
+                GROUP_A.id,
+                "--cluster",
+                "cluster0",
+            ],
+            input="y\n",
+        )
+    finally:
+        package_logger.removeHandler(handler)
+
+    assert result.exit_code == 0, result.output
+    assert any("not present in the definitions" in message for message in handler.messages)
+    assert "Delete the 1 index(es)" in result.output
+    assert mongo_client.commands == [{"dropIndexes": "example", "index": "extra_1"}]
+    assert "Index deletion complete: 1 index(es) deleted." in result.output
+
+
+def test_index_skips_extra_index_deletion_when_declined(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_definitions(tmp_path)
+    client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail(standard="mongodb://only"))
+    _patch_client(monkeypatch, client)
+    existing = [
+        {"v": 2, "key": {"_id": 1}, "name": "_id_"},
+        {"v": 2, "key": {"field": 1}, "name": "field_index"},
+        {"v": 2, "key": {"extra": 1}, "name": "extra_1"},
+    ]
+    mongo_client = FakeMongoClient({"exampleDB": ["example"]}, {("exampleDB", "example"): existing})
+    monkeypatch.setattr("sie_atlas_ops.cli.create_client", lambda uri: mongo_client)
+    handler = _CaptureHandler()
+    package_logger = logging.getLogger("sie_atlas_ops")
+    package_logger.addHandler(handler)
+    try:
+        result = runner.invoke(
+            app,
+            [
+                "index",
+                str(tmp_path),
+                "--project-id",
+                GROUP_A.id,
+                "--cluster",
+                "cluster0",
+            ],
+            input="n\n",
+        )
+    finally:
+        package_logger.removeHandler(handler)
+
+    assert result.exit_code == 0, result.output
+    assert any("Skipping deletion of undefined indexes." in message for message in handler.messages)
+    assert mongo_client.commands == []
+    assert "Index deletion complete" not in result.output
+
+
+def test_index_creates_before_dropping_extra_indexes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_definitions(tmp_path)
+    client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail(standard="mongodb://only"))
+    _patch_client(monkeypatch, client)
+    existing = [
+        {"v": 2, "key": {"_id": 1}, "name": "_id_"},
+        {"v": 2, "key": {"extra": 1}, "name": "extra_1"},
+    ]
+    mongo_client = FakeMongoClient({"exampleDB": ["example"]}, {("exampleDB", "example"): existing})
+    monkeypatch.setattr("sie_atlas_ops.cli.create_client", lambda uri: mongo_client)
+
+    result = runner.invoke(
+        app,
+        [
+            "index",
+            str(tmp_path),
+            "--project-id",
+            GROUP_A.id,
+            "--cluster",
+            "cluster0",
+        ],
+        input="y\n",
+    )
+
+    assert result.exit_code == 0, result.output
+    assert mongo_client.commands == [
+        {
+            "createIndexes": "example",
+            "indexes": [{"name": "field_index", "key": {"field": 1}}],
+        },
+        {"dropIndexes": "example", "index": "extra_1"},
+    ]
+    assert "Index creation complete: 1 index(es) created." in result.output
+    assert "Index deletion complete: 1 index(es) deleted." in result.output
+
+
 def test_index_prompts_when_collection_missing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

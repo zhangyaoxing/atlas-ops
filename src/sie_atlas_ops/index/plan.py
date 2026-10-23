@@ -1,4 +1,4 @@
-"""Decide which declared indexes already exist and which still need creating."""
+"""Decide which declared indexes exist and which existing indexes are extra."""
 
 from __future__ import annotations
 
@@ -31,35 +31,77 @@ class IndexPlanItem:
     existing_options: dict[str, Any] | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class ExtraIndex:
+    """An existing index whose key pattern is not declared."""
+
+    database: str
+    collection: str
+    name: str
+    keys: dict[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class IndexPlan:
+    """Declared-index decisions plus indexes that are not declared."""
+
+    items: tuple[IndexPlanItem, ...]
+    extras: tuple[ExtraIndex, ...]
+
+
 def plan_indexes(
     client: MongoClientLike,
     definitions: list[CollectionIndexes],
     missing: list[MissingNamespace],
-) -> list[IndexPlanItem]:
-    """Classify every declared index against the indexes already in MongoDB.
+) -> IndexPlan:
+    """Classify declared indexes and collect existing indexes that are extra.
 
     Indexes are matched by their ordered key pattern only, never by name.
     ``options`` are compared after removing the server fields ``v`` and ``key``;
-    ``name`` is ignored when the declaration does not specify one.
+    ``name`` is ignored when the declaration does not specify one. The ``_id_``
+    index is never reported as extra.
     """
     missing_namespaces = {(item.database, item.collection) for item in missing}
-    existing_cache: dict[tuple[str, str], list[dict[str, Any]]] = {}
-    plan: list[IndexPlanItem] = []
+    specs_by_namespace: dict[tuple[str, str], list[IndexSpec]] = {}
+    namespace_order: list[tuple[str, str]] = []
 
     for definition in definitions:
         key = (definition.database, definition.collection)
+        if key not in specs_by_namespace:
+            specs_by_namespace[key] = []
+            namespace_order.append(key)
+        specs_by_namespace[key].extend(definition.indexes)
+
+    items: list[IndexPlanItem] = []
+    extras: list[ExtraIndex] = []
+    for database, collection in namespace_order:
+        key = (database, collection)
         if key in missing_namespaces:
             existing: list[dict[str, Any]] = []
-        elif key in existing_cache:
-            existing = existing_cache[key]
         else:
-            collection = client[definition.database][definition.collection]
-            existing = [dict(index) for index in collection.list_indexes()]
-            existing_cache[key] = existing
+            existing = [dict(index) for index in client[database][collection].list_indexes()]
 
-        for spec in definition.indexes:
-            plan.append(_decide(definition.database, definition.collection, spec, existing))
-    return plan
+        specs = specs_by_namespace[key]
+        for spec in specs:
+            items.append(_decide(database, collection, spec, existing))
+
+        declared = {tuple(spec.keys.items()) for spec in specs}
+        for index in existing:
+            name = str(index.get("name") or "")
+            index_key = index.get("key") or {}
+            pattern = tuple(index_key.items())
+            if not name or name == "_id_" or pattern == (("_id", 1),) or pattern in declared:
+                continue
+            extras.append(
+                ExtraIndex(
+                    database=database,
+                    collection=collection,
+                    name=name,
+                    keys=dict(index_key),
+                )
+            )
+
+    return IndexPlan(items=tuple(items), extras=tuple(extras))
 
 
 def _decide(

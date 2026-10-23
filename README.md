@@ -46,6 +46,9 @@ ATLAS_PUBLIC_KEY=... ATLAS_PRIVATE_KEY=... uv run sie-atlas-ops index ./examples
 读取目录下每个 JSON 文件（一个文件描述一个集合的索引），在指定 project 内按集群 ID
 或名称定位集群，再从该集群的连接串中选择一个使用。
 
+除了创建缺失的索引，命令还会找出定义中不存在的已有索引，逐条列出并询问是否删除；
+确认后会在创建完成后执行删除。
+
 ```bash
 # 项目 ID + 集群名
 uv run sie-atlas-ops index ./examples/indexes \
@@ -126,14 +129,17 @@ JSON 格式：
 9. 按 `keys` 的有序字段组合（不看索引名）匹配已有索引：
    - `options` 完全一致 → 输出一条 INFO 并跳过
    - `options` 不一致 → 输出 WARNING（含已有索引名和双方 options）并跳过
-10. 对需要创建的索引执行 `createIndexes`：按 `(database, collection, commitQuorum)`
+10. 找出定义中不存在的已有索引（同样按 `keys` 匹配，`_id_` 永远排除），逐条列出并
+    询问是否删除（默认不删除）
+11. 对需要创建的索引执行 `createIndexes`：按 `(database, collection, commitQuorum)`
     分批，每批发一条命令；索引名取 options 里的 `name`，没有则按 MongoDB 规则生成
     （如 `a_1_b_-1`）；`commitQuorum` 放在命令级
-11. 仅临时用户：无论正常结束、报错还是中止，退出前都调用 Atlas API 删除（只发送
+12. 如果用户确认删除，在索引创建完成后逐条执行 `dropIndexes`
+13. 仅临时用户：无论正常结束、报错还是中止，退出前都调用 Atlas API 删除（只发送
     DELETE，不等待 MongoDB 侧生效；删除失败只记录 WARNING）
-12. 输出集群、项目和已加载的索引定义摘要
+14. 输出集群、项目和已加载的索引定义摘要
 
-命令在创建索引后结束。创建临时数据库用户需要 Atlas API Key 具备相应权限
+命令在创建/删除索引后结束。创建临时数据库用户需要 Atlas API Key 具备相应权限
 （例如 Project Owner 或 Project Database Access Admin）。
 
 比较 options 时会排除服务端字段 `v`、`key`；如果定义里没有写 `name`，已有索引的自动生成名也不会参与比较。
@@ -213,8 +219,9 @@ source .venv/bin/activate
 │       │   ├── __init__.py
 │       │   ├── create.py             # createIndexes 分批创建
 │       │   ├── definitions.py        # 索引定义 JSON 的加载与校验
+│       │   ├── drop.py               # dropIndexes 删除未定义索引
 │       │   ├── mongo.py              # MongoDB 连接、认证 URI、库/集合检查
-│       │   └── plan.py               # 按 keys/options 判断索引是否已存在
+│       │   └── plan.py               # 索引存在性/选项比较与未定义索引检测
 │       ├── log.py                    # 日志配置（RichHandler，stderr）
 │       └── errors.py                 # 面向用户的错误类型
 └── tests/
@@ -222,6 +229,7 @@ source .venv/bin/activate
     ├── index/
     │   ├── test_create.py            # createIndexes 分组与命令构造测试
     │   ├── test_definitions.py       # 定义文件校验测试
+    │   ├── test_drop.py              # dropIndexes 命令测试
     │   ├── test_mongo.py             # MongoDB URI 与存在性检查测试
     │   └── test_plan.py              # 索引存在性/选项比较测试
     ├── test_cli.py                   # CLI 端到端测试
