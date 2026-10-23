@@ -103,6 +103,9 @@ class FakeMongoDatabase:
     def list_collection_names(self) -> list[str]:
         return list(self._collections)
 
+    def list_collections(self) -> list[dict[str, Any]]:
+        return [{"name": collection, "type": "collection"} for collection in self._collections]
+
     def __getitem__(self, collection: str) -> FakeMongoCollection:
         return FakeMongoCollection(self._indexes.get((self._database, collection), []))
 
@@ -211,6 +214,8 @@ def test_index_help_documents_arguments() -> None:
     assert "-c" in result.stdout
     assert "-u" in result.stdout
     assert "-p" in result.stdout
+    assert "--export" in result.stdout
+    assert "-e" in result.stdout
 
 
 def test_index_selects_connection_string(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -534,6 +539,50 @@ def test_index_creates_before_dropping_extra_indexes(
     ]
     assert "Index creation complete: 1 index(es) created." in result.output
     assert "Index deletion complete: 1 index(es) deleted." in result.output
+
+
+def test_index_export_writes_files_without_mutating_indexes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail(standard="mongodb://only"))
+    _patch_client(monkeypatch, client)
+    index_docs = [
+        {"v": 2, "key": {"_id": 1}, "name": "_id_"},
+        {"v": 2, "key": {"field": 1}, "name": "field_1", "unique": True},
+    ]
+    mongo_client = FakeMongoClient(
+        {"exampleDB": ["example"]}, {("exampleDB", "example"): index_docs}
+    )
+    monkeypatch.setattr("sie_atlas_ops.cli.create_client", lambda uri: mongo_client)
+
+    result = runner.invoke(
+        app,
+        [
+            "index",
+            str(tmp_path),
+            "-g",
+            GROUP_A.id,
+            "-c",
+            "cluster0",
+            "-e",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads((tmp_path / "exampleDB.example.json").read_text(encoding="utf-8"))
+    assert payload["database"] == "exampleDB"
+    assert payload["collection"] == "example"
+    assert payload["indexes"] == [
+        {
+            "keys": {"field": 1},
+            "options": {"name": "field_1", "unique": True},
+        }
+    ]
+    assert mongo_client.commands == []
+    assert "Exported 1 index(es) from 1 collection(s)" in result.output
+    assert "Index creation complete" not in result.output
+    assert client.created_user_payload is not None
+    assert len(client.deleted_user_paths) == 1
 
 
 def test_index_prompts_when_collection_missing(

@@ -46,8 +46,9 @@ ATLAS_PUBLIC_KEY=... ATLAS_PRIVATE_KEY=... uv run sie-atlas-ops index ./examples
 读取目录下每个 JSON 文件（一个文件描述一个集合的索引），在指定 project 内按集群 ID
 或名称定位集群，再从该集群的连接串中选择一个使用。
 
-除了创建缺失的索引，命令还会找出定义中不存在的已有索引，逐条列出并询问是否删除；
-确认后会在创建完成后执行删除。
+默认模式会创建缺失的索引，并找出定义中不存在的已有索引，逐条列出并询问是否删除；
+确认后会在创建完成后执行删除。使用 `--export/-e` 时，`DIRECTORY` 变为输出目录：
+不读取定义，也不创建或删除索引，而是把数据库中所有集合的索引定义导出为 JSON 文件。
 
 ```bash
 # 项目 ID + 集群名
@@ -69,16 +70,22 @@ uv run sie-atlas-ops index ./examples/indexes
 uv run sie-atlas-ops index ./examples/indexes \
   --project-id 64f1a2b3c4d5e6f7a8b9c0d1 --cluster cluster0 \
   --db-username appUser --db-password '...'
+
+# 导出所有集合的索引定义到目录（不创建/删除索引）
+uv run sie-atlas-ops index ./exported-indexes \
+  --project-id 64f1a2b3c4d5e6f7a8b9c0d1 --cluster cluster0 --export
 ```
 
 参数：
 
-- `DIRECTORY`：存放 `*.json` 的目录（不递归子目录）
+- `DIRECTORY`：默认模式下存放 `*.json` 定义的输入目录；`--export` 模式下为输出目录
+  （需要已存在，不递归子目录）
 
 选项：
 
 - `-g, --project-id`：project ID（24 位十六进制）；省略时依次取 `ATLAS_PROJECT_ID`、交互输入
 - `-c, --cluster`：集群 ID 或名称；省略时依次取 `ATLAS_CLUSTER_NAME`、交互输入
+- `-e, --export`：导出模式，不执行任何索引创建或删除
 - `-u, --db-username` / `-p, --db-password`：已有数据库用户；也可以使用 `ATLAS_DB_USERNAME` / `ATLAS_DB_PASSWORD`。两者必须同时提供，提供后不会创建或删除临时用户
 - 密码走命令行会进入 shell 历史，建议放在 `.env` 或使用环境变量
 
@@ -111,7 +118,7 @@ JSON 格式：
 
 执行流程：
 
-1. 读取并校验目录下所有 JSON 文件
+1. 读取并校验目录下所有 JSON 文件（`--export` 模式跳过）
 2. 加载最近的 `.env`，再读取 Atlas API 凭据（shell 变量优先）
 3. 解析 project：`--project-id` → `ATLAS_PROJECT_ID` → 交互输入（校验 24 位十六进制）
 4. 解析集群：`--cluster` → `ATLAS_CLUSTER_NAME` → 交互输入；在指定 project 内按 ID
@@ -139,12 +146,29 @@ JSON 格式：
     DELETE，不等待 MongoDB 侧生效；删除失败只记录 WARNING）
 14. 输出集群、项目和已加载的索引定义摘要
 
-命令在创建/删除索引后结束。创建临时数据库用户需要 Atlas API Key 具备相应权限
-（例如 Project Owner 或 Project Database Access Admin）。
+使用 `--export` 时，步骤 1（读取定义）和步骤 8–14（应用/删除索引）不会执行；连接
+MongoDB 后直接进入导出模式，然后清理临时用户并输出导出摘要。
+
+### 导出模式
+
+`--export/-e` 把 `DIRECTORY` 当作输出目录，逐集合写出索引定义：
+
+- 不执行任何 `createIndexes` / `dropIndexes`
+- 仍然执行 project/cluster、连接串、临时用户创建与等待流程；退出时照常删除临时用户
+- 遍历所有数据库，跳过 `admin`、`local`、`config` 系统库
+- 跳过 `system.*` 集合和 view
+- 每个存在非 `_id_` 索引的集合生成一个 `<database>.<collection>.json`
+- 文件名中的 `/`、`\`、`:` 等不安全字符替换为 `_`
+- 只有 `_id_` 索引的集合不生成文件
+- `options` 保留 `name`、`unique` 等，去掉服务端字段 `v`、`key`、`ns`
+- 导出文件可以直接作为默认模式的输入目录重新使用
+
+默认模式在创建/删除索引后结束；导出模式在写文件后结束。创建临时数据库用户需要
+Atlas API Key 具备相应权限（例如 Project Owner 或 Project Database Access Admin）。
 
 比较 options 时会排除服务端字段 `v`、`key`；如果定义里没有写 `name`，已有索引的自动生成名也不会参与比较。
 
-如果确认继续，MongoDB 会在创建索引时隐式创建缺失的库和集合；选择中止则退出码为 1。
+如果确认继续，MongoDB 会在创建索引时隐式创建缺失的库和集合；选择中止则退出码为 1（仅默认模式）。
 
 临时用户的凭据只在运行期间存在，不再输出到摘要。`deleteAfterDate` 的 6 小时过期仍作为兜底，防止进程被强杀时用户永久残留。提供自有数据库凭据时不会创建临时用户，也不会执行删除。
 
@@ -220,6 +244,7 @@ source .venv/bin/activate
 │       │   ├── create.py             # createIndexes 分批创建
 │       │   ├── definitions.py        # 索引定义 JSON 的加载与校验
 │       │   ├── drop.py               # dropIndexes 删除未定义索引
+│       │   ├── export.py             # 按命名空间导出索引定义
 │       │   ├── mongo.py              # MongoDB 连接、认证 URI、库/集合检查
 │       │   └── plan.py               # 索引存在性/选项比较与未定义索引检测
 │       ├── log.py                    # 日志配置（RichHandler，stderr）
@@ -230,6 +255,7 @@ source .venv/bin/activate
     │   ├── test_create.py            # createIndexes 分组与命令构造测试
     │   ├── test_definitions.py       # 定义文件校验测试
     │   ├── test_drop.py              # dropIndexes 命令测试
+    │   ├── test_export.py            # 索引导出与文件命名测试
     │   ├── test_mongo.py             # MongoDB URI 与存在性检查测试
     │   └── test_plan.py              # 索引存在性/选项比较测试
     ├── test_cli.py                   # CLI 端到端测试

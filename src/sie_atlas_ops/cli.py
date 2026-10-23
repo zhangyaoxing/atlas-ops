@@ -49,6 +49,7 @@ from sie_atlas_ops.errors import AtlasOperationError, ConfigurationError, OpsErr
 from sie_atlas_ops.index.create import CreateResult, create_indexes
 from sie_atlas_ops.index.definitions import CollectionIndexes, load_index_definitions
 from sie_atlas_ops.index.drop import DroppedIndex, drop_indexes
+from sie_atlas_ops.index.export import ExportResult, export_indexes
 from sie_atlas_ops.index.mongo import (
     MissingNamespace,
     MongoClientLike,
@@ -115,7 +116,10 @@ def index(
         dir_okay=True,
         readable=True,
         resolve_path=True,
-        help="Directory containing one JSON file per collection.",
+        help=(
+            "Directory with index definition JSON files, or the export "
+            "destination when --export is used."
+        ),
     ),
     project: str | None = typer.Option(
         None,
@@ -131,6 +135,14 @@ def index(
         "--cluster",
         "-c",
         help=(f"Atlas cluster ID or name. Falls back to {CLUSTER_NAME_ENV}, then prompts."),
+    ),
+    export: bool = typer.Option(
+        False,
+        "--export",
+        "-e",
+        help=(
+            "Export existing indexes from MongoDB into DIRECTORY instead of applying definitions."
+        ),
     ),
     db_username: str | None = typer.Option(
         None,
@@ -155,20 +167,23 @@ def index(
 ) -> None:
     """Load index definitions, locate the cluster, and pick a connection string.
 
-    Every ``*.json`` file in DIRECTORY is parsed and validated. The project is
-    resolved from the option, the environment, or an interactive prompt; the
-    cluster is looked up inside that project, and one of its connection strings
-    is selected interactively. Existing database credentials are used when
-    supplied; otherwise a cluster-scoped temporary database user is created,
-    expires after six hours, and is deleted on every exit path. Missing
-    databases and collections are reported and confirmed, existing indexes are
-    compared by key pattern and options, and the remaining indexes are created.
-    Existing indexes whose key pattern is not declared are reported and, on
-    confirmation, dropped.
+    In the default mode, every ``*.json`` file in DIRECTORY is parsed and
+    validated. The project is resolved from the option, the environment, or an
+    interactive prompt; the cluster is looked up inside that project, and one of
+    its connection strings is selected interactively. Existing database
+    credentials are used when supplied; otherwise a cluster-scoped temporary
+    database user is created, expires after six hours, and is deleted on every
+    exit path. Missing databases and collections are reported and confirmed,
+    existing indexes are compared by key pattern and options, and the remaining
+    indexes are created. Existing indexes whose key pattern is not declared are
+    reported and, on confirmation, dropped. With ``--export``, existing indexes
+    are instead exported to DIRECTORY and no index is created or dropped.
     """
     try:
-        definitions = load_index_definitions(directory)
         provided_credentials = _resolve_db_credentials(db_username, db_password)
+        definitions: list[CollectionIndexes] | None = None
+        if not export:
+            definitions = load_index_definitions(directory)
         with client_from_env() as client:
             project_id, cluster_ref = _resolve_references(project, cluster)
             target_project = get_project(client, project_id)
@@ -222,39 +237,52 @@ def index(
                         )
                         wait_for_user(mongo_client)
                         logger.info("Temporary user is active.")
-                    missing = find_missing_namespaces(mongo_client, definitions)
-                    if missing:
-                        _report_missing(missing)
-                        if not typer.confirm(
-                            "Continue and let MongoDB create the missing databases/collections?",
-                            default=False,
-                        ):
-                            typer.echo("Aborted.")
-                            raise typer.Exit(code=1)
-                    plan = plan_indexes(mongo_client, definitions, missing)
-                    _log_index_plan(plan.items)
-                    delete_extras = False
-                    if plan.extras:
-                        _log_extra_indexes(plan.extras)
-                        delete_extras = typer.confirm(
-                            f"Delete the {len(plan.extras)} index(es) that are "
-                            "not present in the definitions?",
-                            default=False,
+
+                    if export:
+                        logger.info("Exporting index definitions to %s...", directory)
+                        export_result = export_indexes(mongo_client, directory)
+                        logger.info(
+                            "Exported %d index(es) from %d collection(s).",
+                            export_result.indexes,
+                            export_result.files,
                         )
-                        if not delete_extras:
-                            logger.info("Skipping deletion of undefined indexes.")
-                    pending = sum(1 for item in plan.items if item.action is IndexAction.CREATE)
-                    if pending:
-                        logger.info("Creating %d index(es)...", pending)
-                    created = create_indexes(mongo_client, plan.items)
-                    dropped: list[DroppedIndex] = []
-                    if delete_extras:
-                        dropped = drop_indexes(mongo_client, list(plan.extras))
+                    else:
+                        assert definitions is not None
+                        missing = find_missing_namespaces(mongo_client, definitions)
+                        if missing:
+                            _report_missing(missing)
+                            if not typer.confirm(
+                                "Continue and let MongoDB create the missing "
+                                "databases/collections?",
+                                default=False,
+                            ):
+                                typer.echo("Aborted.")
+                                raise typer.Exit(code=1)
+                        plan = plan_indexes(mongo_client, definitions, missing)
+                        _log_index_plan(plan.items)
+                        delete_extras = False
+                        if plan.extras:
+                            _log_extra_indexes(plan.extras)
+                            delete_extras = typer.confirm(
+                                f"Delete the {len(plan.extras)} index(es) that are "
+                                "not present in the definitions?",
+                                default=False,
+                            )
+                            if not delete_extras:
+                                logger.info("Skipping deletion of undefined indexes.")
+                        pending = sum(1 for item in plan.items if item.action is IndexAction.CREATE)
+                        if pending:
+                            logger.info("Creating %d index(es)...", pending)
+                        created = create_indexes(mongo_client, plan.items)
+                        dropped: list[DroppedIndex] = []
+                        if delete_extras:
+                            dropped = drop_indexes(mongo_client, list(plan.extras))
                 finally:
                     mongo_client.close()
 
-                _log_created(created)
-                _log_dropped(dropped)
+                if not export:
+                    _log_created(created)
+                    _log_dropped(dropped)
             finally:
                 if temporary_user is not None:
                     _delete_temporary_user(client, project_id, temporary_user)
@@ -264,17 +292,22 @@ def index(
         _fail(describe_atlas_error(exc))
     except PyMongoError as exc:
         _fail(f"MongoDB request failed: {exc}")
+    except OSError as exc:
+        _fail(f"Could not write exported indexes: {exc}")
     except httpx.HTTPError as exc:
         _fail(f"Could not reach the Atlas API: {exc}")
 
-    _print_summary(
-        directory,
-        definitions,
-        target,
-        selected,
-        sum(len(result.names) for result in created),
-        len(dropped),
-    )
+    if export:
+        _print_export_summary(directory, target, selected, export_result)
+    else:
+        _print_summary(
+            directory,
+            definitions,
+            target,
+            selected,
+            sum(len(result.names) for result in created),
+            len(dropped),
+        )
 
 
 def _resolve_references(project: str | None, cluster: str | None) -> tuple[str, str]:
@@ -526,6 +559,23 @@ def _print_summary(
         typer.echo("Index creation complete: no new indexes.")
     if deleted_count:
         typer.echo(f"Index deletion complete: {deleted_count} index(es) deleted.")
+
+
+def _print_export_summary(
+    directory: Path,
+    target: ClusterTarget,
+    selected: ConnectionOption,
+    result: ExportResult,
+) -> None:
+    typer.echo("")
+    typer.echo(f"Cluster:    {target.cluster_name} ({target.cluster_id or 'unknown ID'})")
+    typer.echo(f"Project:    {target.project_name} ({target.project_id})")
+    typer.echo(f'Connection: "{selected.uri}"')
+    typer.echo(f"            [{selected.label}]")
+    typer.echo("")
+    typer.echo(
+        f"Exported {result.indexes} index(es) from {result.files} collection(s) to {directory}."
+    )
 
 
 def _format_utc(value: datetime) -> str:
