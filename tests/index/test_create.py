@@ -44,6 +44,7 @@ def _item(
 def test_default_index_name_matches_mongodb_convention() -> None:
     assert default_index_name({"a": 1}) == "a_1"
     assert default_index_name({"a": 1, "b": -1}) == "a_1_b_-1"
+    assert default_index_name({"a": 1.0, "b": -1.0}) == "a_1_b_-1"
     assert default_index_name({"description": "text"}) == "description_text"
 
 

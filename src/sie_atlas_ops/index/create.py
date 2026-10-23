@@ -59,7 +59,14 @@ def create_indexes(client: MongoClientLike, plan: list[IndexPlanItem]) -> list[C
 
 def default_index_name(keys: Mapping[str, Any]) -> str:
     """Generate the name MongoDB uses when none is supplied."""
-    return "_".join(f"{field}_{direction}" for field, direction in keys.items())
+
+    def direction_name(direction: Any) -> str:
+        # 1.0 is the same direction as 1, and MongoDB names it "1".
+        if isinstance(direction, float) and direction.is_integer():
+            return str(int(direction))
+        return str(direction)
+
+    return "_".join(f"{field}_{direction_name(direction)}" for field, direction in keys.items())
 
 
 def _index_document(spec: IndexSpec) -> dict[str, Any]:
