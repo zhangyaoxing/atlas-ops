@@ -3,12 +3,15 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from pymongo.errors import OperationFailure
 
+from sie_atlas_ops.errors import AtlasOperationError
 from sie_atlas_ops.index.definitions import CollectionIndexes
 from sie_atlas_ops.index.mongo import (
     MissingNamespace,
     build_authenticated_uri,
     find_missing_namespaces,
+    wait_for_user,
 )
 
 
@@ -116,3 +119,52 @@ def test_find_missing_namespaces_checks_every_definition() -> None:
         MissingNamespace(database="a", collection="two", database_exists=True),
         MissingNamespace(database="b", collection="three", database_exists=False),
     ]
+
+
+class FlakyAuthClient:
+    def __init__(self, failures: int, code: int = 18) -> None:
+        self.failures = failures
+        self.code = code
+        self.calls = 0
+
+    def list_database_names(self) -> list[str]:
+        self.calls += 1
+        if self.failures:
+            self.failures -= 1
+            raise OperationFailure("Authentication failed.", code=self.code)
+        return ["exampleDB"]
+
+
+def test_wait_for_user_returns_immediately() -> None:
+    client = FlakyAuthClient(failures=0)
+
+    wait_for_user(client)
+
+    assert client.calls == 1
+
+
+@pytest.mark.parametrize("code", [13, 18])
+def test_wait_for_user_retries_authentication_errors(
+    monkeypatch: pytest.MonkeyPatch, code: int
+) -> None:
+    monkeypatch.setattr("sie_atlas_ops.index.mongo.time.sleep", lambda _: None)
+    client = FlakyAuthClient(failures=2, code=code)
+
+    wait_for_user(client, timeout_seconds=5.0, interval_seconds=0.01)
+
+    assert client.calls == 3
+
+
+def test_wait_for_user_times_out(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("sie_atlas_ops.index.mongo.time.sleep", lambda _: None)
+    client = FlakyAuthClient(failures=10)
+
+    with pytest.raises(AtlasOperationError, match="did not become active"):
+        wait_for_user(client, timeout_seconds=0)
+
+
+def test_wait_for_user_propagates_other_errors() -> None:
+    client = FlakyAuthClient(failures=1, code=2)
+
+    with pytest.raises(OperationFailure):
+        wait_for_user(client, timeout_seconds=5.0)

@@ -2,15 +2,24 @@
 
 from __future__ import annotations
 
+import logging
+import time
 from dataclasses import dataclass
 from typing import Any, Protocol
 from urllib.parse import quote, urlsplit, urlunsplit
 
 from pymongo import MongoClient
+from pymongo.errors import OperationFailure
 
+from sie_atlas_ops.errors import AtlasOperationError
 from sie_atlas_ops.index.definitions import CollectionIndexes
 
 _DEFAULT_TIMEOUT_MS = 10_000
+_USER_READY_TIMEOUT_SECONDS = 120.0
+_USER_READY_INTERVAL_SECONDS = 2.0
+_RETRYABLE_AUTH_CODES = frozenset({13, 18})
+
+logger = logging.getLogger(__name__)
 
 
 class MongoClientLike(Protocol):
@@ -54,6 +63,35 @@ def create_client(uri: str, *, timeout_ms: int = _DEFAULT_TIMEOUT_MS) -> MongoCl
         connectTimeoutMS=timeout_ms,
         appname="sie-atlas-ops",
     )
+
+
+def wait_for_user(
+    client: MongoClientLike,
+    *,
+    timeout_seconds: float = _USER_READY_TIMEOUT_SECONDS,
+    interval_seconds: float = _USER_READY_INTERVAL_SECONDS,
+) -> None:
+    """Wait until the temporary user can authenticate against the cluster.
+
+    Atlas creates database users asynchronously, so authentication can fail
+    with codes 13/18 shortly after creation. Retry those errors until
+    *timeout_seconds* elapse.
+    """
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        try:
+            client.list_database_names()
+            return
+        except OperationFailure as exc:
+            if exc.code not in _RETRYABLE_AUTH_CODES:
+                raise
+            if time.monotonic() >= deadline:
+                raise AtlasOperationError(
+                    "Temporary user did not become active within "
+                    f"{timeout_seconds:.0f} seconds: {exc}"
+                ) from exc
+            logger.debug("Temporary user is not active yet (%s); retrying.", exc)
+            time.sleep(interval_seconds)
 
 
 def find_missing_namespaces(

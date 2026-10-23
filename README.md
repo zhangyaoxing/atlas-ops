@@ -101,12 +101,14 @@ JSON 格式：
    awsPrivateLink / privateEndpoint）；多个时提示选择
 6. 创建临时数据库用户：角色 `readWriteAnyDatabase`，通过 `scopes` 限定到当前集群，
    `deleteAfterDate` 设为 6 小时后由 Atlas 自动删除
-7. 用临时用户连接 MongoDB，检查每个定义文件中 `database` / `collection` 是否存在；
+7. 等待临时用户生效：用新凭据轮询需要认证的 `listDatabases`，认证失败（错误码 13/18）
+   时每 2 秒重试，最多等待 120 秒
+8. 用临时用户连接 MongoDB，检查每个定义文件中 `database` / `collection` 是否存在；
    缺失的库或集合会逐条列出，并询问是否继续（默认不继续）
-8. 按 `keys` 的有序字段组合（不看索引名）匹配已有索引：
+9. 按 `keys` 的有序字段组合（不看索引名）匹配已有索引：
    - `options` 完全一致 → 输出一条 INFO 并跳过
    - `options` 不一致 → 输出 WARNING（含已有索引名和双方 options）并跳过
-9. 输出集群、项目、临时用户凭据和已加载的索引定义摘要
+10. 输出集群、项目、临时用户凭据和已加载的索引定义摘要
 
 命令在索引检查后结束，实际创建索引尚未实现。创建数据库用户需要 Atlas API Key
 具备相应权限（例如 Project Owner 或 Project Database Access Admin）。

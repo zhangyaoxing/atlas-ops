@@ -720,6 +720,8 @@ def test_index_logs_found_cluster_and_connection_strings(
         for message in handler.messages
     )
     assert any("Created temporary user [cyan]" in message for message in handler.messages)
+    assert any("Waiting for temporary user [cyan]" in message for message in handler.messages)
+    assert any("Temporary user is active." in message for message in handler.messages)
     password = client.created_user_payload["password"]
     assert all(password not in message for message in handler.messages)
 

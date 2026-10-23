@@ -49,6 +49,7 @@ from sie_atlas_ops.index.mongo import (
     build_authenticated_uri,
     create_client,
     find_missing_namespaces,
+    wait_for_user,
 )
 from sie_atlas_ops.index.plan import IndexAction, IndexPlanItem, plan_indexes
 from sie_atlas_ops.log import configure_logging
@@ -123,9 +124,10 @@ def index(
     resolved from the argument, the environment, or an interactive prompt; the
     cluster is looked up inside that project, and one of its connection strings
     is selected interactively. A cluster-scoped temporary database user is then
-    created and expires after six hours. Missing databases and collections are
-    reported and confirmed, and existing indexes are compared by key pattern
-    and options. Creating the indexes is not implemented yet.
+    created and expires after six hours; the command waits for that user to
+    become active. Missing databases and collections are reported and confirmed,
+    and existing indexes are compared by key pattern and options. Creating the
+    indexes is not implemented yet.
     """
     try:
         definitions = load_index_definitions(directory)
@@ -162,6 +164,12 @@ def index(
 
         mongo_client = _open_mongo_client(selected, temporary_user)
         try:
+            logger.info(
+                "Waiting for temporary user [cyan]%s[/cyan] to become active...",
+                escape(temporary_user.username),
+            )
+            wait_for_user(mongo_client)
+            logger.info("Temporary user is active.")
             missing = find_missing_namespaces(mongo_client, definitions)
             if missing:
                 _report_missing(missing)
