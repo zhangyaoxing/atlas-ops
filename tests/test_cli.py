@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -539,6 +540,67 @@ def test_index_creates_before_dropping_extra_indexes(
     ]
     assert "Index creation complete: 1 index(es) created." in result.output
     assert "Index deletion complete: 1 index(es) deleted." in result.output
+
+
+def test_index_summary_table_counts_per_collection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "one.json").write_text(
+        json.dumps(
+            {
+                "database": "exampleDB",
+                "collection": "one",
+                "indexes": [{"keys": {"a": 1}}, {"keys": {"b": 1}}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "two.json").write_text(
+        json.dumps(
+            {
+                "database": "exampleDB",
+                "collection": "two",
+                "indexes": [{"keys": {"c": 1}}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail(standard="mongodb://only"))
+    _patch_client(monkeypatch, client)
+    mongo_client = FakeMongoClient(
+        {"exampleDB": ["one", "two"]},
+        {
+            ("exampleDB", "one"): [
+                {"v": 2, "key": {"_id": 1}, "name": "_id_"},
+                {"v": 2, "key": {"a": 1}, "name": "a_1"},
+            ],
+            ("exampleDB", "two"): [
+                {"v": 2, "key": {"_id": 1}, "name": "_id_"},
+                {"v": 2, "key": {"c": 1}, "name": "c_1"},
+                {"v": 2, "key": {"old": 1}, "name": "old_1"},
+            ],
+        },
+    )
+    monkeypatch.setattr("sie_atlas_ops.cli.create_client", lambda uri: mongo_client)
+
+    result = runner.invoke(
+        app,
+        [
+            "index",
+            str(tmp_path),
+            "--project-id",
+            GROUP_A.id,
+            "--cluster",
+            "cluster0",
+        ],
+        input="y\n",
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Index summary (2 collection(s)" in result.output
+    assert re.search(r"^exampleDB\.one[ \t]+1[ \t]+1[ \t]+0$", result.output, re.MULTILINE)
+    assert re.search(r"^exampleDB\.two[ \t]+0[ \t]+1[ \t]+1$", result.output, re.MULTILINE)
+    assert re.search(r"^Total[ \t]+1[ \t]+2[ \t]+1$", result.output, re.MULTILINE)
 
 
 def test_index_export_writes_files_without_mutating_indexes(

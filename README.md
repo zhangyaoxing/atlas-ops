@@ -146,7 +146,21 @@ JSON 格式：
 12. 如果用户确认删除，在索引创建完成后逐条执行 `dropIndexes`
 13. 仅临时用户：无论正常结束、报错还是中止，退出前都调用 Atlas API 删除（只发送
     DELETE，不等待 MongoDB 侧生效；删除失败只记录 WARNING）
-14. 输出集群、项目和已加载的索引定义摘要
+14. 输出集群、项目、连接串，以及按集合统计的 Created / Skipped / Deleted 文字表格；
+    Skipped 包含 identical 和 options 不一致而跳过的索引
+
+默认模式结束时输出类似：
+
+```text
+Index summary (2 collection(s) from /path/to/definitions):
+Collection     Created  Skipped  Deleted
+-------------  -------  -------  -------
+exampleDB.one        1        1        0
+exampleDB.two        0        1        1
+-------------  -------  -------  -------
+Total                1        2        1
+Skipped = identical or options-conflict indexes.
+```
 
 使用 `--export` 时，步骤 1（读取定义）和步骤 8–14（应用/删除索引）不会执行；连接
 MongoDB 后直接进入导出模式，然后清理临时用户并输出导出摘要。

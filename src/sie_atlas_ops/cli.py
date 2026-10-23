@@ -61,6 +61,7 @@ from sie_atlas_ops.index.mongo import (
 from sie_atlas_ops.index.plan import (
     ExtraIndex,
     IndexAction,
+    IndexPlan,
     IndexPlanItem,
     plan_indexes,
 )
@@ -300,14 +301,7 @@ def index(
     if export:
         _print_export_summary(directory, target, selected, export_result)
     else:
-        _print_summary(
-            directory,
-            definitions,
-            target,
-            selected,
-            sum(len(result.names) for result in created),
-            len(dropped),
-        )
+        _print_summary(directory, definitions, plan, dropped, target, selected)
 
 
 def _resolve_references(project: str | None, cluster: str | None) -> tuple[str, str]:
@@ -535,10 +529,10 @@ def _prompt_choice(count: int, label: str) -> int:
 def _print_summary(
     directory: Path,
     definitions: list[CollectionIndexes],
+    plan: IndexPlan,
+    dropped: list[DroppedIndex],
     target: ClusterTarget,
     selected: ConnectionOption,
-    created_count: int,
-    deleted_count: int,
 ) -> None:
     typer.echo("")
     typer.echo(f"Cluster:    {target.cluster_name} ({target.cluster_id or 'unknown ID'})")
@@ -546,19 +540,78 @@ def _print_summary(
     typer.echo(f'Connection: "{selected.uri}"')
     typer.echo(f"            [{selected.label}]")
     typer.echo("")
-    typer.echo(f"Loaded {len(definitions)} collection definition(s) from {directory}:")
-    for definition in definitions:
-        typer.echo(
-            f"  {definition.database}.{definition.collection}: "
-            f"{len(definition.indexes)} index(es) ({definition.path.name})"
-        )
+
+    rows = _collection_summary(definitions, plan, dropped)
+    typer.echo(f"Index summary ({len(rows)} collection(s) from {directory}):")
+    typer.echo(_format_index_table(rows))
+    typer.echo("Skipped = identical or options-conflict indexes.")
     typer.echo("")
+
+    created_count = sum(row[1] for row in rows)
+    deleted_count = sum(row[3] for row in rows)
     if created_count:
         typer.echo(f"Index creation complete: {created_count} index(es) created.")
     else:
         typer.echo("Index creation complete: no new indexes.")
     if deleted_count:
         typer.echo(f"Index deletion complete: {deleted_count} index(es) deleted.")
+
+
+def _collection_summary(
+    definitions: list[CollectionIndexes],
+    plan: IndexPlan,
+    dropped: list[DroppedIndex],
+) -> list[tuple[str, int, int, int]]:
+    counts: dict[tuple[str, str], list[int]] = {}
+    order: list[tuple[str, str]] = []
+
+    def bucket(key: tuple[str, str]) -> list[int]:
+        if key not in counts:
+            counts[key] = [0, 0, 0]
+            order.append(key)
+        return counts[key]
+
+    for definition in definitions:
+        bucket((definition.database, definition.collection))
+    for item in plan.items:
+        counts_for_item = bucket((item.database, item.collection))
+        if item.action is IndexAction.CREATE:
+            counts_for_item[0] += 1
+        else:
+            counts_for_item[1] += 1
+    for item in dropped:
+        bucket((item.database, item.collection))[2] += 1
+
+    return [
+        (f"{database}.{collection}", *counts[(database, collection)])
+        for database, collection in order
+    ]
+
+
+def _format_index_table(rows: list[tuple[str, int, int, int]]) -> str:
+    headers = ("Collection", "Created", "Skipped", "Deleted")
+    total = (
+        "Total",
+        sum(row[1] for row in rows),
+        sum(row[2] for row in rows),
+        sum(row[3] for row in rows),
+    )
+    widths = [len(value) for value in headers]
+    for row in [*rows, total]:
+        for index, value in enumerate(row):
+            widths[index] = max(widths[index], len(str(value)))
+
+    def render(cells: tuple[object, ...]) -> str:
+        return "  ".join(
+            [str(cells[0]).ljust(widths[0])]
+            + [str(value).rjust(widths[index]) for index, value in enumerate(cells[1:], start=1)]
+        )
+
+    rule = "  ".join("-" * width for width in widths)
+    lines = [render(headers), rule]
+    lines.extend(render(row) for row in rows)
+    lines.extend([rule, render(total)])
+    return "\n".join(lines)
 
 
 def _print_export_summary(
