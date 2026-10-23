@@ -5,7 +5,7 @@ Command-line tool for SIE Atlas operations.
 ## Requirements
 
 - [uv](https://docs.astral.sh/uv/)
-- Python 3.10 (selected automatically by uv from `.python-version`)
+- Python 3.10 or newer (`requires-python = ">=3.10"`)
 
 ## Quick start
 
@@ -54,11 +54,12 @@ also skip `.env` entirely and export the variables directly.
 Read every JSON file in a directory (one file per collection), locate the cluster by
 ID or name within the specified project, and select one of its connection strings.
 
-The default mode creates missing indexes, finds existing indexes that are not
-present in the definitions, lists them, and asks whether to delete them. Confirmed
-deletions run after index creation. With `--export/-e`, `DIRECTORY` becomes an output
-directory: definitions are not read, no index is created or deleted, and the index
-definitions of every collection in the database are exported as JSON files.
+The default mode creates missing indexes for the collections in the definitions,
+finds existing indexes in those collections that are not present in the definitions,
+lists them, and asks whether to delete them. Confirmed deletions run after index
+creation. With `--export/-e`, `DIRECTORY` becomes an output directory: definitions
+are not read, no index is created or deleted, and the index definitions of every
+collection in all non-system databases are exported as JSON files.
 
 ```bash
 # Project ID + cluster name
@@ -109,8 +110,8 @@ specified project.
 Connection string fields can be strings, lists, or dictionaries. Strings are used
 directly, lists are expanded item by item, and dictionaries are expanded value by
 value (nested structures are expanded recursively). Only values starting with
-`mongodb://` or `mongodb+srv://` are accepted. Every resulting connection string is
-offered as a separate option.
+`mongodb://` or `mongodb+srv://` are accepted. Every unique resulting connection
+string is offered as a separate option.
 
 JSON format:
 
@@ -164,8 +165,9 @@ Execution flow:
    - `options` match exactly → log one INFO and skip
    - `options` differ → log a WARNING (with the existing name and both option sets)
      and skip
-10. Find existing indexes that are not present in the definitions (again by `keys`;
-    `_id_` is always excluded), list them, and ask whether to delete them (default: no)
+10. Find existing indexes in the defined collections that are not present in the
+    definitions (again by `keys`; `_id_` is always excluded), list them, and ask
+    whether to delete them (default: no)
 11. Run `createIndexes` for indexes that need creating, grouped by
     `(database, collection, commitQuorum)` with one command per group; the index name
     comes from `options.name`, or is generated using MongoDB rules (for example
@@ -203,17 +205,21 @@ collection by collection:
 
 - No `createIndexes` / `dropIndexes` is executed
 - The project/cluster, connection-string, and temporary-user create/wait flow still
-  runs; the temporary user is deleted on exit as usual
-- Every database is scanned, excluding the `admin`, `local`, and `config` system
-  databases
+  runs (the temporary user is skipped when existing database credentials are
+  supplied); any temporary user is deleted on exit as usual
+- All non-system databases are scanned; `admin`, `local`, and `config` are skipped
 - `system.*` collections and views are skipped
 - Every collection with at least one non-`_id_` index produces one
   `<database>.<collection>.json` file
 - Unsafe filename characters such as `/`, `\`, and `:` are replaced with `_`
 - Collections with only the `_id_` index produce no file
-- `options` keeps `name`, `unique`, and other user options while removing the
-  server-managed fields `v`, `key`, and `ns`
-- Exported files can be used directly as the input directory for the default mode
+- `options` keeps every field returned by `listIndexes` except the server-managed
+  `v`, `key`, and `ns`; this includes `name`, `unique`, and metadata such as
+  `textIndexVersion`
+- Exported files use the same JSON shape as input definitions. Regular indexes
+  generally can be reused directly; special index types such as text indexes are
+  returned by `listIndexes` in MongoDB's internal form (for example `_fts` / `_ftsx`
+  keys) and may need manual adjustment before reuse
 - The run ends with a per-collection Markdown table showing the number of exported
   indexes and the total:
 
@@ -230,9 +236,9 @@ files and printing the summary. Creating a temporary database user requires an A
 API key with sufficient permissions (for example Project Owner or Project Database
 Access Admin).
 
-When comparing options, the server-managed fields `v` and `key` are excluded. If a
-definition does not specify `name`, the existing index's generated name is ignored
-during comparison as well.
+When comparing options, `v` and `key` are removed from the existing index's options.
+If a definition does not specify `name`, the existing index's generated name is
+ignored during comparison as well.
 
 If you confirm continuation, MongoDB creates missing databases and collections
 implicitly during index creation; aborting exits with code 1 (default mode only).
@@ -245,10 +251,10 @@ user is created or deleted.
 ## Logging
 
 Logs use the standard-library `logging` module with
-`rich.logging.RichHandler` (Rich is installed with Typer, so no extra dependency is
-needed). Logs go to stderr while stdout is reserved for command results, so
-redirection keeps the two streams separate. Rich colorizes output when the terminal
-supports it and honors `NO_COLOR` (`NO_COLOR=1` disables colors).
+`rich.logging.RichHandler`; Rich is a direct project dependency. Logs go to stderr
+while stdout is reserved for command results, so redirection keeps the two streams
+separate. Rich colorizes output when the terminal supports it and honors `NO_COLOR`
+(`NO_COLOR=1` disables colors).
 
 All logs are in English and default to INFO level. Typical output:
 
@@ -309,10 +315,16 @@ source .venv/bin/activate
 ```text
 .
 ├── pyproject.toml                    # project metadata, dependencies, tool config
-├── .python-version                   # pins Python 3.10
+├── uv.lock                           # locked dependency versions
 ├── .env.example                      # environment variable template (copy to .env)
 ├── .vscode/                          # VS Code debug, test, and format config
-├── examples/indexes/example.json     # example index definition
+├── LICENSE                           # project license
+├── examples/indexes/                 # sample index definitions
+│   ├── exampleDB.example.json
+│   ├── sample_mflix.movies.json
+│   ├── sample_mflix.sessions.json
+│   ├── sample_mflix.theaters.json
+│   └── sample_mflix.users.json
 ├── src/
 │   └── sie_atlas_ops/
 │       ├── __init__.py               # version
