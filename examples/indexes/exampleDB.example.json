@@ -10,14 +10,6 @@
       "options": {
         "name": "field_1_field_2_1"
       }
-    },
-    {
-      "keys": {
-        "field": 1
-      },
-      "options": {
-        "name": "field_index"
-      }
     }
   ]
 }
