@@ -8,7 +8,7 @@ from urllib.parse import quote, urlsplit, urlunsplit
 
 from pymongo import MongoClient
 
-from sie_atlas_ops.index_definitions import CollectionIndexes
+from sie_atlas_ops.index.definitions import CollectionIndexes
 
 _DEFAULT_TIMEOUT_MS = 10_000
 

@@ -3,9 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from sie_atlas_ops.index_definitions import CollectionIndexes, IndexSpec
-from sie_atlas_ops.index_plan import IndexAction, plan_indexes
-from sie_atlas_ops.mongo import MissingNamespace
+from sie_atlas_ops.index.definitions import CollectionIndexes, IndexSpec
+from sie_atlas_ops.index.mongo import MissingNamespace
+from sie_atlas_ops.index.plan import IndexAction, plan_indexes
 
 
 class FakeCollection:

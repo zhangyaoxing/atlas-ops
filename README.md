@@ -190,20 +190,23 @@ source .venv/bin/activate
 │       ├── cli.py                    # Typer 应用与命令定义
 │       ├── atlas.py                  # 凭据、集群查找、连接串
 │       ├── env.py                    # .env 加载（向上查找，不覆盖已有变量）
-│       ├── index_definitions.py      # 索引定义 JSON 的加载与校验
-│       ├── index_plan.py             # 按 keys/options 判断索引是否已存在
-│       ├── mongo.py                  # MongoDB 连接、认证 URI、库/集合检查
+│       ├── index/
+│       │   ├── __init__.py
+│       │   ├── definitions.py        # 索引定义 JSON 的加载与校验
+│       │   ├── mongo.py              # MongoDB 连接、认证 URI、库/集合检查
+│       │   └── plan.py               # 按 keys/options 判断索引是否已存在
 │       ├── log.py                    # 日志配置（RichHandler，stderr）
 │       └── errors.py                 # 面向用户的错误类型
 └── tests/
     ├── conftest.py                   # 隔离工作目录，避免读到真实 .env
+    ├── index/
+    │   ├── test_definitions.py       # 定义文件校验测试
+    │   ├── test_mongo.py             # MongoDB URI 与存在性检查测试
+    │   └── test_plan.py              # 索引存在性/选项比较测试
     ├── test_cli.py                   # CLI 端到端测试
     ├── test_atlas.py                 # Atlas 辅助逻辑测试
     ├── test_env.py                   # .env 加载测试
-    ├── test_index_definitions.py     # 定义文件校验测试
-    ├── test_index_plan.py            # 索引存在性/选项比较测试
-    ├── test_log.py                   # 颜色/日志配置测试
-    └── test_mongo.py                 # MongoDB URI 与存在性检查测试
+    └── test_log.py                   # 颜色/日志配置测试
 ```
 
 ## 依赖说明

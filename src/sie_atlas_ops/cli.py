@@ -42,16 +42,16 @@ from sie_atlas_ops.atlas import (
 )
 from sie_atlas_ops.env import load_env
 from sie_atlas_ops.errors import AtlasOperationError, OpsError
-from sie_atlas_ops.index_definitions import CollectionIndexes, load_index_definitions
-from sie_atlas_ops.index_plan import IndexAction, IndexPlanItem, plan_indexes
-from sie_atlas_ops.log import configure_logging
-from sie_atlas_ops.mongo import (
+from sie_atlas_ops.index.definitions import CollectionIndexes, load_index_definitions
+from sie_atlas_ops.index.mongo import (
     MissingNamespace,
     MongoClientLike,
     build_authenticated_uri,
     create_client,
     find_missing_namespaces,
 )
+from sie_atlas_ops.index.plan import IndexAction, IndexPlanItem, plan_indexes
+from sie_atlas_ops.log import configure_logging
 
 logger = logging.getLogger(__name__)
 

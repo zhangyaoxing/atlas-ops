@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from sie_atlas_ops.index_definitions import CollectionIndexes
-from sie_atlas_ops.mongo import (
+from sie_atlas_ops.index.definitions import CollectionIndexes
+from sie_atlas_ops.index.mongo import (
     MissingNamespace,
     build_authenticated_uri,
     find_missing_namespaces,
