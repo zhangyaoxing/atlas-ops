@@ -1379,18 +1379,26 @@ class FakeAppServicesClient:
     def __init__(
         self,
         apps_by_product: dict[str | None, list[Any]],
+        services_by_app: dict[str, list[Any]],
         triggers_by_app: dict[str, list[Any]],
     ) -> None:
         self._apps_by_product = apps_by_product
+        self._services_by_app = services_by_app
         self._triggers_by_app = triggers_by_app
         self.app_calls: list[tuple[str, str | None]] = []
+        self.service_calls: list[tuple[str, str]] = []
         self.trigger_calls: list[tuple[str, str]] = []
         self.apps = SimpleNamespace(admin_list_applications=self._list_apps)
+        self.services = SimpleNamespace(admin_list_services=self._list_services)
         self.triggers = SimpleNamespace(admin_list_triggers=self._list_triggers)
 
     def _list_apps(self, group_id: str, *, product: str | None = None) -> list[Any]:
         self.app_calls.append((group_id, product))
         return self._apps_by_product.get(product, [])
+
+    def _list_services(self, app_id: str, group_id: str) -> list[Any]:
+        self.service_calls.append((app_id, group_id))
+        return self._services_by_app.get(app_id, [])
 
     def _list_triggers(self, app_id: str, group_id: str) -> list[Any]:
         self.trigger_calls.append((app_id, group_id))
@@ -1410,12 +1418,14 @@ def test_trigger_help_documents_arguments() -> None:
     assert "directory" in result.stdout
     assert "--project-id" in result.stdout
     assert "-g" in result.stdout
+    assert "--cluster" in result.stdout
+    assert "-c" in result.stdout
     assert "--export" in result.stdout
     assert "-e" in result.stdout
 
 
 def test_trigger_exports_definitions(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    client = FakeAtlasClient([GROUP_A], {}, _detail())
+    client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail())
     _patch_client(monkeypatch, client)
     app_client = FakeAppServicesClient(
         {
@@ -1425,10 +1435,23 @@ def test_trigger_exports_definitions(tmp_path: Path, monkeypatch: pytest.MonkeyP
         {
             "app-1": [
                 {
+                    "_id": "svc-1",
+                    "type": "mongodb-atlas",
+                    "config": {"clusterName": "cluster0"},
+                }
+            ]
+        },
+        {
+            "app-1": [
+                {
                     "_id": "trigger-1",
                     "name": "on-insert",
                     "type": "DATABASE",
-                    "config": {"database": "db", "collection": "coll"},
+                    "config": {
+                        "service_id": "svc-1",
+                        "database": "db",
+                        "collection": "coll",
+                    },
                 }
             ]
         },
@@ -1437,33 +1460,50 @@ def test_trigger_exports_definitions(tmp_path: Path, monkeypatch: pytest.MonkeyP
 
     result = runner.invoke(
         app,
-        ["trigger", str(tmp_path), "-g", GROUP_A.id, "-e"],
+        [
+            "trigger",
+            str(tmp_path),
+            "-g",
+            GROUP_A.id,
+            "-c",
+            "cluster0",
+            "-e",
+        ],
     )
 
     assert result.exit_code == 0, result.output
-    payload = json.loads((tmp_path / "my-app.json").read_text(encoding="utf-8"))
+    payload = json.loads((tmp_path / "db.coll.json").read_text(encoding="utf-8"))
     assert payload == {
-        "appId": "app-1",
-        "appName": "my-app",
+        "database": "db",
+        "collection": "coll",
         "triggers": [
             {
-                "name": "on-insert",
-                "type": "DATABASE",
-                "config": {"database": "db", "collection": "coll"},
+                "appId": "app-1",
+                "appName": "my-app",
+                "trigger": {
+                    "name": "on-insert",
+                    "type": "DATABASE",
+                    "config": {
+                        "service_id": "svc-1",
+                        "database": "db",
+                        "collection": "coll",
+                    },
+                },
             }
         ],
     }
     assert app_client.app_calls == [(GROUP_A.id, None), (GROUP_A.id, "atlas")]
+    assert app_client.service_calls == [("app-1", GROUP_A.id)]
     assert app_client.trigger_calls == [("app-1", GROUP_A.id)]
     assert client.created_user_payload is None
-    assert "Trigger export summary (1 app(s)" in result.output
-    assert re.search(r"^\| my-app\s+\|\s+1 \|$", result.output, re.MULTILINE)
+    assert "Trigger export summary (1 collection(s)" in result.output
+    assert re.search(r"^\| db\.coll\s+\|\s+1 \|$", result.output, re.MULTILINE)
     assert re.search(
         r"^\| \*\*Total\*\*\s+\|\s+\*\*1\*\* \|$",
         result.output,
         re.MULTILINE,
     )
-    assert "Exported 1 trigger(s) from 1 app(s)" in result.output
+    assert "Exported 1 trigger(s) from 1 collection(s) across 1 app(s)" in result.output
 
 
 def test_trigger_requires_export(tmp_path: Path) -> None:
@@ -1488,16 +1528,17 @@ def test_trigger_reports_missing_credentials(
     assert "Project ID (24 hexadecimal characters)" not in result.output
 
 
-def test_trigger_uses_environment_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    client = FakeAtlasClient([GROUP_A], {}, _detail())
+def test_trigger_uses_environment_targets(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail())
     _patch_client(monkeypatch, client)
-    app_client = FakeAppServicesClient({None: [], "atlas": []}, {})
+    app_client = FakeAppServicesClient({None: [], "atlas": []}, {}, {})
     monkeypatch.setattr("atlas_ops.cli.app_services_client_from_env", lambda: app_client)
     monkeypatch.setenv("ATLAS_PROJECT_ID", GROUP_A.id)
+    monkeypatch.setenv("ATLAS_CLUSTER_NAME", "cluster0")
 
     result = runner.invoke(app, ["trigger", str(tmp_path), "--export"])
 
     assert result.exit_code == 0, result.output
     assert client.get_group_calls == [GROUP_A.id]
     assert app_client.app_calls == [(GROUP_A.id, None), (GROUP_A.id, "atlas")]
-    assert "Exported 0 trigger(s) from 0 app(s)" in result.output
+    assert "Exported 0 trigger(s) from 0 collection(s) across 0 app(s)" in result.output

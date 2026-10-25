@@ -321,15 +321,17 @@ MongoDB connection.
 
 ### `trigger`
 
-Export all App Services trigger definitions for one project. The command uses the
-SDK's App Services Admin client (`AtlasAppAdminClient`), so it needs only Atlas API
-credentials and a project ID. It does not select a cluster, connect to MongoDB, or
+Export App Services trigger definitions related to one Atlas cluster. The command
+uses the SDK's App Services Admin client (`AtlasAppAdminClient`), so it needs Atlas
+API credentials, a project ID, and a cluster; it does not connect to MongoDB or
 create a temporary database user. Only export mode is implemented so far.
 
 ```bash
 mkdir -p ./exported-triggers
 uv run atlas-ops trigger ./exported-triggers \
-  --project-id 64f1a2b3c4d5e6f7a8b9c0d1 --export
+  --project-id 64f1a2b3c4d5e6f7a8b9c0d1 \
+  --cluster cluster0 \
+  --export
 ```
 
 Arguments:
@@ -339,49 +341,67 @@ Arguments:
 Options:
 
 - `-g, --project-id`: project ID; falls back to `ATLAS_PROJECT_ID`, then prompts
+- `-c, --cluster`: cluster ID or name; falls back to `ATLAS_CLUSTER_NAME`, then prompts
 - `-e, --export`: export mode; required for now
 
 Behavior:
 
 - Logs in to the App Services Admin API with the Atlas API key pair
 - Scans both standard apps and the special `atlas` product app
-- Writes one file per app with triggers: `<app>.json`
-- Removes the server-managed trigger `_id`; all other trigger definition fields are
-  preserved, including `name`, `type`, `disabled`, `config`, `function_id` /
-  `function_name`, and `event_processors`
-- Apps without triggers produce no file
+- Inspects each app's MongoDB data sources and keeps only those linked to the target
+  cluster (matched by cluster name or ID)
+- Keeps only `DATABASE` triggers on those data sources that specify both a database
+  and a collection
+- Writes one file per collection: `<database>.<collection>.json`
+- Removes the server-managed trigger `_id`; all other definition fields are preserved,
+  including `name`, `type`, `disabled`, `config`, `function_id` / `function_name`,
+  and `event_processors`
+- Includes `appId` and `appName` for each trigger so multiple apps can share a
+  collection file
+- Collections without matching triggers produce no file
 - Unsafe filename characters are replaced with `_`
-- The run ends with a per-app Markdown table and total count:
+- The run ends with a per-collection Markdown table and total count:
 
   ```text
-  Trigger export summary (1 app(s) from /path/to/exported-triggers):
+  Trigger export summary (1 collection(s) from /path/to/exported-triggers):
 
-  | App       | Exported |
-  | --------- | -------: |
-  | my-app    |        2 |
-  | **Total** |    **2** |
+  | Collection        | Exported |
+  | ----------------- | -------: |
+  | exampleDB.example |        2 |
+  | **Total**         |    **2** |
   ```
 
 Trigger file format:
 
 ```json
 {
-  "appId": "65f1a2b3c4d5e6f7a8b9c0d1",
-  "appName": "my-app",
+  "database": "exampleDB",
+  "collection": "example",
   "triggers": [
     {
-      "name": "on-insert",
-      "type": "DATABASE",
-      "disabled": false,
-      "config": {
-        "database": "exampleDB",
-        "collection": "example",
-        "operation_types": ["INSERT"]
-      },
-      "function_id": "..."
+      "appId": "65f1a2b3c4d5e6f7a8b9c0d1",
+      "appName": "my-app",
+      "trigger": {
+        "name": "on-insert",
+        "type": "DATABASE",
+        "disabled": false,
+        "config": {
+          "service_id": "...",
+          "database": "exampleDB",
+          "collection": "example",
+          "operation_types": ["INSERT"]
+        },
+        "function_id": "..."
+      }
     }
   ]
 }
+```
+
+The final summary line also reports the number of contributing apps:
+
+```text
+Exported 2 trigger(s) from 1 collection(s) across 1 app(s) to /path/to/exported-triggers.
 ```
 
 The Atlas API key needs App Services admin access for the project, for example

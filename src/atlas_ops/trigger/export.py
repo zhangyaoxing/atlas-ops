@@ -1,4 +1,4 @@
-"""Export App Services trigger definitions from an Atlas project."""
+"""Export App Services trigger definitions for one Atlas cluster."""
 
 from __future__ import annotations
 
@@ -14,58 +14,50 @@ class AppServicesClientLike(Protocol):
     """Subset of the App Services client used for trigger export."""
 
     apps: Any
+    services: Any
     triggers: Any
 
 
 @dataclass(frozen=True, slots=True)
-class TriggerApp:
-    """One App Services app written during a trigger export."""
+class TriggerCollection:
+    """One collection written during a trigger export."""
 
-    app_id: str
-    app_name: str
+    database: str
+    collection: str
     triggers: int
 
 
 @dataclass(frozen=True, slots=True)
 class TriggerExportResult:
-    """App files and triggers written during an export."""
+    """Collection files, apps, and triggers written during an export."""
 
     files: int
     triggers: int
-    apps: tuple[TriggerApp, ...]
+    apps: int
+    collections: tuple[TriggerCollection, ...]
 
 
 def export_triggers(
     client: AppServicesClientLike,
     project_id: str,
+    cluster_name: str,
+    cluster_id: str,
     directory: Path,
 ) -> TriggerExportResult:
-    """Write one JSON file per App Services app that has triggers.
+    """Export database triggers related to *cluster_name* by namespace.
 
-    Both standard apps and the special ``atlas`` product app are scanned.
-    Server-managed trigger ``_id`` values are removed; all other trigger
-    definition fields are preserved.
+    Each App Services app is inspected for data sources linked to the target
+    cluster. Only ``DATABASE`` triggers on those data sources that name both a
+    database and a collection are exported. Results are grouped into
+    ``<database>.<collection>.json`` files, with app context retained for each
+    trigger. Server-managed trigger ``_id`` values are removed.
     """
     directory.mkdir(parents=True, exist_ok=True)
 
-    apps_by_id: dict[str, Any] = {}
-    for product in (None, "atlas"):
-        for app in client.apps.admin_list_applications(group_id=project_id, product=product):
-            app_id = getattr(app, "id", None)
-            if isinstance(app_id, str) and app_id and app_id not in apps_by_id:
-                apps_by_id[app_id] = app
+    grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    apps_with_triggers: set[str] = set()
 
-    files = 0
-    triggers = 0
-    exported: list[TriggerApp] = []
-    apps = sorted(
-        apps_by_id.values(),
-        key=lambda app: (
-            str(getattr(app, "name", "") or ""),
-            str(getattr(app, "id", "") or ""),
-        ),
-    )
-    for app in apps:
+    for app in _list_apps(client, project_id):
         app_id = getattr(app, "id", None)
         if not isinstance(app_id, str) or not app_id:
             continue
@@ -73,38 +65,147 @@ def export_triggers(
         if not isinstance(app_name, str) or not app_name:
             app_name = app_id
 
-        raw_triggers = client.triggers.admin_list_triggers(
+        service_ids = _matching_service_ids(
+            client,
+            app_id,
+            project_id,
+            cluster_name,
+            cluster_id,
+        )
+        if not service_ids:
+            continue
+
+        for trigger in client.triggers.admin_list_triggers(
             app_id=app_id,
             group_id=project_id,
-        )
-        definitions = [
-            definition
-            for trigger in raw_triggers
-            if (definition := _trigger_definition(trigger)) is not None
-        ]
-        if not definitions:
-            continue
-        definitions.sort(key=lambda item: str(item.get("name") or ""))
+        ):
+            definition = _trigger_definition(trigger)
+            if definition is None:
+                continue
+            if str(definition.get("type") or "").upper() != "DATABASE":
+                continue
+            config = definition.get("config")
+            if not isinstance(config, dict):
+                continue
+            service_id = config.get("service_id")
+            if not isinstance(service_id, str) or service_id not in service_ids:
+                continue
+            database = config.get("database")
+            collection = config.get("collection")
+            if (
+                not isinstance(database, str)
+                or not database
+                or not isinstance(collection, str)
+                or not collection
+            ):
+                continue
 
+            grouped.setdefault((database, collection), []).append(
+                {
+                    "appId": app_id,
+                    "appName": app_name,
+                    "trigger": definition,
+                }
+            )
+            apps_with_triggers.add(app_id)
+
+    files = 0
+    triggers = 0
+    exported: list[TriggerCollection] = []
+    for database, collection in sorted(grouped):
+        entries = grouped[(database, collection)]
+        entries.sort(
+            key=lambda item: (
+                str(item["appName"]),
+                str(item["trigger"].get("name") or ""),
+            )
+        )
         document = {
-            "appId": app_id,
-            "appName": app_name,
-            "triggers": definitions,
+            "database": database,
+            "collection": collection,
+            "triggers": entries,
         }
-        path = directory / json_filename(app_name)
+        path = directory / json_filename(database, collection)
         path.write_text(
             json.dumps(document, indent=2, ensure_ascii=False, default=str) + "\n",
             encoding="utf-8",
         )
         files += 1
-        triggers += len(definitions)
-        exported.append(TriggerApp(app_id=app_id, app_name=app_name, triggers=len(definitions)))
+        triggers += len(entries)
+        exported.append(
+            TriggerCollection(
+                database=database,
+                collection=collection,
+                triggers=len(entries),
+            )
+        )
 
     return TriggerExportResult(
         files=files,
         triggers=triggers,
-        apps=tuple(exported),
+        apps=len(apps_with_triggers),
+        collections=tuple(exported),
     )
+
+
+def _list_apps(
+    client: AppServicesClientLike,
+    project_id: str,
+) -> list[Any]:
+    apps_by_id: dict[str, Any] = {}
+    for product in (None, "atlas"):
+        for app in client.apps.admin_list_applications(group_id=project_id, product=product):
+            app_id = getattr(app, "id", None)
+            if isinstance(app_id, str) and app_id and app_id not in apps_by_id:
+                apps_by_id[app_id] = app
+    return sorted(
+        apps_by_id.values(),
+        key=lambda app: (
+            str(getattr(app, "name", "") or ""),
+            str(getattr(app, "id", "") or ""),
+        ),
+    )
+
+
+def _matching_service_ids(
+    client: AppServicesClientLike,
+    app_id: str,
+    project_id: str,
+    cluster_name: str,
+    cluster_id: str,
+) -> set[str]:
+    services = _results(
+        client.services.admin_list_services(
+            app_id=app_id,
+            group_id=project_id,
+        )
+    )
+    matching: set[str] = set()
+    for service in services:
+        service_type = service.get("type")
+        if isinstance(service_type, str) and service_type != "mongodb-atlas":
+            continue
+
+        config = service.get("config")
+        if not isinstance(config, dict):
+            continue
+        configured_name = (
+            config.get("clusterName") or config.get("cluster_name") or service.get("name")
+        )
+        configured_id = config.get("clusterId") or config.get("cluster_id")
+        name_matches = (
+            isinstance(configured_name, str) and configured_name.lower() == cluster_name.lower()
+        )
+        id_matches = (
+            bool(cluster_id) and configured_id is not None and str(configured_id) == cluster_id
+        )
+        if not (name_matches or id_matches):
+            continue
+
+        service_id = service.get("_id")
+        if isinstance(service_id, str) and service_id:
+            matching.add(service_id)
+    return matching
 
 
 def _trigger_definition(trigger: Any) -> dict[str, Any] | None:
@@ -120,3 +221,13 @@ def _trigger_definition(trigger: Any) -> dict[str, Any] | None:
     if not isinstance(name, str) or not name:
         return None
     return raw
+
+
+def _results(payload: Any) -> list[dict[str, Any]]:
+    if isinstance(payload, list):
+        return [item for item in payload if isinstance(item, dict)]
+    if isinstance(payload, dict):
+        results = payload.get("results")
+        if isinstance(results, list):
+            return [item for item in results if isinstance(item, dict)]
+    return []

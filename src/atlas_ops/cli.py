@@ -35,7 +35,6 @@ from atlas_ops.atlas import (
     AtlasClientLike,
     ClusterTarget,
     ConnectionOption,
-    ProjectTarget,
     TemporaryUser,
     app_services_client_from_env,
     client_from_env,
@@ -414,6 +413,12 @@ def trigger(
             f"Falls back to {PROJECT_ID_ENV}, then prompts."
         ),
     ),
+    cluster: str | None = typer.Option(
+        None,
+        "--cluster",
+        "-c",
+        help=(f"Atlas cluster ID or name. Falls back to {CLUSTER_NAME_ENV}, then prompts."),
+    ),
     export: bool = typer.Option(
         False,
         "--export",
@@ -421,27 +426,41 @@ def trigger(
         help="Export all App Services trigger definitions to DIRECTORY.",
     ),
 ) -> None:
-    """Export all App Services trigger definitions for one project.
+    """Export App Services trigger definitions for one cluster.
 
     Uses the App Services Admin API client and only needs Atlas API
-    credentials plus the project ID. No cluster selection, MongoDB
-    connection, or temporary database user is involved.
+    credentials, the project ID, and the cluster. Triggers are filtered to
+    database triggers on data sources linked to that cluster and grouped by
+    database collection. No MongoDB connection or temporary database user is
+    involved.
     """
-    target: ProjectTarget | None = None
+    target: ClusterTarget | None = None
     result: TriggerExportResult | None = None
     try:
         if not export:
             raise AtlasOperationError("The trigger command currently supports only --export/-e.")
         with client_from_env() as client:
-            project_id = _resolve_project(project)
-            target = get_project(client, project_id)
+            project_id, cluster_ref = _resolve_references(project, cluster)
+            target_project = get_project(client, project_id)
+            matches = find_clusters(client, target_project, cluster_ref)
+            if not matches:
+                raise AtlasOperationError(f"No cluster found for {cluster_ref!r}.")
+            target = matches[0] if len(matches) == 1 else _choose_cluster(matches)
+            _log_found_cluster(target, cluster_ref)
         with app_services_client_from_env() as app_client:
             logger.info("Exporting trigger definitions to %s...", directory)
-            result = export_triggers(app_client, project_id, directory)
+            result = export_triggers(
+                app_client,
+                project_id,
+                target.cluster_name,
+                target.cluster_id,
+                directory,
+            )
             logger.info(
-                "Exported %d trigger(s) from %d app(s).",
+                "Exported %d trigger(s) from %d collection(s) across %d app(s).",
                 result.triggers,
                 result.files,
+                result.apps,
             )
     except OpsError as exc:
         _fail(str(exc))
@@ -847,19 +866,23 @@ def _print_search_export_summary(
 
 def _print_trigger_export_summary(
     directory: Path,
-    target: ProjectTarget,
+    target: ClusterTarget,
     result: TriggerExportResult,
 ) -> None:
     typer.echo("")
+    typer.echo(f"Cluster:    {target.cluster_name} ({target.cluster_id or 'unknown ID'})")
     typer.echo(f"Project:    {target.project_name} ({target.project_id})")
     typer.echo("")
 
-    rows = [(app.app_name, app.triggers) for app in result.apps]
-    typer.echo(f"Trigger export summary ({result.files} app(s) from {directory}):")
+    rows = [(f"{item.database}.{item.collection}", item.triggers) for item in result.collections]
+    typer.echo(f"Trigger export summary ({result.files} collection(s) from {directory}):")
     typer.echo("")
-    typer.echo(_format_export_table(rows, first_header="App"))
+    typer.echo(_format_export_table(rows))
     typer.echo("")
-    typer.echo(f"Exported {result.triggers} trigger(s) from {result.files} app(s) to {directory}.")
+    typer.echo(
+        f"Exported {result.triggers} trigger(s) from {result.files} "
+        f"collection(s) across {result.apps} app(s) to {directory}."
+    )
 
 
 def _format_utc(value: datetime) -> str:
