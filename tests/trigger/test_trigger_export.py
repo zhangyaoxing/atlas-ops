@@ -7,7 +7,11 @@ from typing import Any
 
 from pyatlassdk.app.models.trigger import Trigger
 
-from atlas_ops.trigger import TriggerApp, TriggerExportResult, export_triggers
+from atlas_ops.trigger.export import (
+    TriggerApp,
+    TriggerExportResult,
+    export_triggers,
+)
 
 
 class FakeApps:

@@ -69,8 +69,8 @@ from atlas_ops.index.plan import (
     plan_indexes,
 )
 from atlas_ops.log import configure_logging
-from atlas_ops.search import SearchExportResult, export_search_indexes
-from atlas_ops.trigger import TriggerExportResult, export_triggers
+from atlas_ops.search.export import SearchExportResult, export_search_indexes
+from atlas_ops.trigger.export import TriggerExportResult, export_triggers
 
 logger = logging.getLogger(__name__)
 

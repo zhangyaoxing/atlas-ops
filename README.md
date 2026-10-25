@@ -482,8 +482,12 @@ source .venv/bin/activate
 │       │   ├── export.py             # export index definitions by namespace
 │       │   ├── mongo.py              # MongoDB connection, auth URI, namespace checks
 │       │   └── plan.py               # index/option comparison and extra-index detection
-│       ├── search.py                 # export Atlas Search index definitions
-│       ├── trigger.py                # export App Services trigger definitions
+│       ├── search/
+│       │   ├── __init__.py
+│       │   └── export.py             # export Atlas Search index definitions
+│       ├── trigger/
+│       │   ├── __init__.py
+│       │   └── export.py             # export App Services trigger definitions
 │       ├── log.py                    # logging config (RichHandler, stderr)
 │       └── errors.py                 # user-facing error types
 └── tests/
@@ -495,12 +499,14 @@ source .venv/bin/activate
     │   ├── test_export.py            # index export and filename tests
     │   ├── test_mongo.py             # MongoDB URI and namespace tests
     │   └── test_plan.py              # index/option comparison tests
+    ├── search/
+    │   └── test_search_export.py     # Atlas Search export tests
+    ├── trigger/
+    │   └── test_trigger_export.py    # App Services trigger export tests
     ├── test_cli.py                   # end-to-end CLI tests
     ├── test_atlas.py                 # Atlas helper tests
     ├── test_env.py                   # .env loading tests
-    ├── test_log.py                   # color/logging configuration tests
-    ├── test_search.py                # Atlas Search export tests
-    └── test_trigger.py               # App Services trigger export tests
+    └── test_log.py                   # color/logging configuration tests
 ```
 
 ## Dependencies

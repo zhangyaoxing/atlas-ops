@@ -4,7 +4,11 @@ import json
 from pathlib import Path
 from typing import Any
 
-from atlas_ops.search import SearchCollection, SearchExportResult, export_search_indexes
+from atlas_ops.search.export import (
+    SearchCollection,
+    SearchExportResult,
+    export_search_indexes,
+)
 
 
 class FakeClient:
