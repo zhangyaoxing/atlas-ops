@@ -12,10 +12,10 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Protocol
 from urllib.parse import quote
 
-from pyatlassdk import AtlasApiError, AtlasClient
-from pyatlassdk.models.cloud_database_user import CloudDatabaseUser
-from pyatlassdk.models.database_user_role import DatabaseUserRole
-from pyatlassdk.models.user_scope import UserScope
+from pyatlassdk import AtlasAdminApiError, AtlasAdminClient
+from pyatlassdk.admin.models.cloud_database_user import CloudDatabaseUser
+from pyatlassdk.admin.models.database_user_role import DatabaseUserRole
+from pyatlassdk.admin.models.user_scope import UserScope
 from pydantic import BaseModel
 
 from sie_atlas_ops.errors import AtlasOperationError, ConfigurationError
@@ -76,7 +76,7 @@ class AtlasRequestClient(Protocol):
 
 
 class AtlasClientLike(AtlasProjectClient, AtlasClusterClient, AtlasRequestClient, Protocol):
-    """Subset of :class:`AtlasClient` used by this module (handy for tests)."""
+    """Subset of :class:`AtlasAdminClient` used by this module (handy for tests)."""
 
 
 class ConnectionStringsCluster(Protocol):
@@ -125,7 +125,7 @@ def is_object_id(value: str) -> bool:
     return bool(_OBJECT_ID_PATTERN.fullmatch(value))
 
 
-def client_from_env(environ: Mapping[str, str] | None = None) -> AtlasClient:
+def client_from_env(environ: Mapping[str, str] | None = None) -> AtlasAdminClient:
     """Build an Atlas client from ``ATLAS_PUBLIC_KEY``/``ATLAS_PRIVATE_KEY``."""
     env = os.environ if environ is None else environ
     missing = [name for name in (PUBLIC_KEY_ENV, PRIVATE_KEY_ENV) if not env.get(name, "").strip()]
@@ -135,7 +135,7 @@ def client_from_env(environ: Mapping[str, str] | None = None) -> AtlasClient:
             "in the environment or in a .env file. "
             "Use the public and private key of an Atlas API key."
         )
-    return AtlasClient(
+    return AtlasAdminClient(
         public_key=env[PUBLIC_KEY_ENV].strip(),
         private_key=env[PRIVATE_KEY_ENV].strip(),
     )
@@ -145,7 +145,7 @@ def get_project(client: AtlasProjectClient, project_id: str) -> ProjectTarget:
     """Resolve *project_id* to its human-readable name."""
     try:
         group = client.projects.get_group(group_id=project_id)
-    except AtlasApiError as exc:
+    except AtlasAdminApiError as exc:
         if exc.status_code == 404:
             raise AtlasOperationError(
                 f"Project {project_id!r} was not found or is not accessible."
@@ -288,7 +288,7 @@ def delete_temporary_user(client: AtlasRequestClient, project_id: str, username:
             response_model=None,
             accept=_DATABASE_USER_ACCEPT,
         )
-    except AtlasApiError as exc:
+    except AtlasAdminApiError as exc:
         if exc.status_code == 404:
             return
         raise
@@ -311,7 +311,7 @@ def _generate_password(length: int = 24) -> str:
             return candidate
 
 
-def describe_atlas_error(exc: AtlasApiError) -> str:
+def describe_atlas_error(exc: AtlasAdminApiError) -> str:
     """Turn an SDK error into a compact message for CLI output."""
     detail = ""
     if isinstance(exc.payload, dict):

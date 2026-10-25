@@ -22,7 +22,7 @@ from typing import NoReturn
 
 import httpx
 import typer
-from pyatlassdk import AtlasApiError
+from pyatlassdk import AtlasAdminApiError
 from pymongo.errors import PyMongoError
 from rich.markup import escape
 
@@ -295,7 +295,7 @@ def index(
                     _delete_temporary_user(client, project_id, temporary_user)
     except OpsError as exc:
         _fail(str(exc))
-    except AtlasApiError as exc:
+    except AtlasAdminApiError as exc:
         _fail(describe_atlas_error(exc))
     except PyMongoError as exc:
         _fail(f"MongoDB request failed: {exc}")
@@ -379,7 +379,7 @@ def search(
             )
     except OpsError as exc:
         _fail(str(exc))
-    except AtlasApiError as exc:
+    except AtlasAdminApiError as exc:
         _fail(describe_atlas_error(exc))
     except OSError as exc:
         _fail(f"Could not write exported search indexes: {exc}")

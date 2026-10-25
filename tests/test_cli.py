@@ -10,9 +10,9 @@ from typing import Any
 from urllib.parse import quote
 
 import pytest
-from pyatlassdk import AtlasApiError
-from pyatlassdk.models.cloud_database_user import CloudDatabaseUser
-from pyatlassdk.models.cluster_description20240805 import ClusterDescription20240805
+from pyatlassdk import AtlasAdminApiError
+from pyatlassdk.admin.models.cloud_database_user import CloudDatabaseUser
+from pyatlassdk.admin.models.cluster_description20240805 import ClusterDescription20240805
 from pymongo.errors import PyMongoError
 from typer.testing import CliRunner
 
@@ -61,7 +61,7 @@ class FakeAtlasClient:
         self.get_group_calls.append(group_id)
         group = self._groups.get(group_id)
         if group is None:
-            raise AtlasApiError(404, "Not Found", {"detail": "project not found"})
+            raise AtlasAdminApiError(404, "Not Found", {"detail": "project not found"})
         return group
 
     def _list_clusters(self, group_id: str, **_: Any) -> SimpleNamespace:
@@ -769,7 +769,7 @@ def test_index_warns_when_temporary_user_deletion_fails(
     class FailingDeleteClient(FakeAtlasClient):
         def request(self, method: str, path: str, **kwargs: Any) -> Any:
             if method == "DELETE":
-                raise AtlasApiError(500, "boom", {"detail": "delete failed"})
+                raise AtlasAdminApiError(500, "boom", {"detail": "delete failed"})
             return super().request(method, path, **kwargs)
 
     client = FailingDeleteClient(
@@ -1111,7 +1111,7 @@ def test_index_reports_atlas_api_errors(tmp_path: Path, monkeypatch: pytest.Monk
 
     class FailingClient(FakeAtlasClient):
         def _get_group(self, group_id: str, **_: Any) -> Any:
-            raise AtlasApiError(401, "Unauthorized", {"detail": "invalid credentials"})
+            raise AtlasAdminApiError(401, "Unauthorized", {"detail": "invalid credentials"})
 
     client = FailingClient([], {}, _detail(standard="mongodb://x"))
     _patch_client(monkeypatch, client)

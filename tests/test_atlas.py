@@ -6,9 +6,9 @@ from typing import Any
 from urllib.parse import quote
 
 import pytest
-from pyatlassdk import AtlasApiError
-from pyatlassdk.models.cloud_database_user import CloudDatabaseUser
-from pyatlassdk.models.cluster_description20240805 import ClusterDescription20240805
+from pyatlassdk import AtlasAdminApiError
+from pyatlassdk.admin.models.cloud_database_user import CloudDatabaseUser
+from pyatlassdk.admin.models.cluster_description20240805 import ClusterDescription20240805
 
 from sie_atlas_ops.atlas import (
     ClusterTarget,
@@ -43,7 +43,7 @@ def _fake_client(
 
     def get_group(group_id: str, **_: Any) -> Any:
         if group_id not in groups_by_id:
-            raise AtlasApiError(404, "Not Found", {"detail": "no project"})
+            raise AtlasAdminApiError(404, "Not Found", {"detail": "no project"})
         return groups_by_id[group_id]
 
     def list_group_clusters(group_id: str, **kwargs: Any) -> SimpleNamespace:
@@ -110,11 +110,11 @@ def test_get_project_reports_missing_project() -> None:
 
 def test_get_project_propagates_other_errors() -> None:
     def get_group(**_: Any) -> Any:
-        raise AtlasApiError(403, "Forbidden", None)
+        raise AtlasAdminApiError(403, "Forbidden", None)
 
     client: Any = SimpleNamespace(projects=SimpleNamespace(get_group=get_group))
 
-    with pytest.raises(AtlasApiError):
+    with pytest.raises(AtlasAdminApiError):
         get_project(client, GROUP_A.id)
 
 
@@ -298,7 +298,7 @@ def test_connection_options_without_connection_strings() -> None:
 
 
 def test_describe_atlas_error_prefers_detail() -> None:
-    error = AtlasApiError(401, "Unauthorized", {"detail": "invalid credentials"})
+    error = AtlasAdminApiError(401, "Unauthorized", {"detail": "invalid credentials"})
 
     assert describe_atlas_error(error) == (
         "Atlas API request failed (HTTP 401): invalid credentials"
@@ -306,7 +306,7 @@ def test_describe_atlas_error_prefers_detail() -> None:
 
 
 def test_describe_atlas_error_handles_text_payload() -> None:
-    error = AtlasApiError(500, "boom", "internal error")
+    error = AtlasAdminApiError(500, "boom", "internal error")
 
     assert describe_atlas_error(error) == "Atlas API request failed (HTTP 500): internal error"
 
@@ -397,13 +397,13 @@ def test_delete_temporary_user_sends_delete_request() -> None:
 
 
 def test_delete_temporary_user_ignores_missing_user() -> None:
-    client = _DeleteRequestClient(AtlasApiError(404, "Not Found", None))
+    client = _DeleteRequestClient(AtlasAdminApiError(404, "Not Found", None))
 
     delete_temporary_user(client, GROUP_A.id, "already-gone")
 
 
 def test_delete_temporary_user_propagates_other_errors() -> None:
-    client = _DeleteRequestClient(AtlasApiError(500, "boom", None))
+    client = _DeleteRequestClient(AtlasAdminApiError(500, "boom", None))
 
-    with pytest.raises(AtlasApiError):
+    with pytest.raises(AtlasAdminApiError):
         delete_temporary_user(client, GROUP_A.id, "user")
