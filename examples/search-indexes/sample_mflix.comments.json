@@ -1,0 +1,15 @@
+{
+  "database": "sample_mflix",
+  "collection": "comments",
+  "indexes": [
+    {
+      "name": "default",
+      "type": "search",
+      "definition": {
+        "mappings": {
+          "dynamic": true
+        }
+      }
+    }
+  ]
+}
