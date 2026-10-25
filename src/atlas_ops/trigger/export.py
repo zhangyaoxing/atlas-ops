@@ -14,6 +14,7 @@ class AppServicesClientLike(Protocol):
     """Subset of the App Services client used for trigger export."""
 
     apps: Any
+    functions: Any
     services: Any
     triggers: Any
 
@@ -75,6 +76,21 @@ def export_triggers(
         if not service_ids:
             continue
 
+        functions_by_name = {
+            name: function_id
+            for function in _results(
+                client.functions.admin_list_functions(
+                    app_id=app_id,
+                    group_id=project_id,
+                )
+            )
+            if isinstance((name := function.get("name")), str)
+            and isinstance((function_id := function.get("_id")), str)
+            and name
+            and function_id
+        }
+        function_cache: dict[str, dict[str, Any] | None] = {}
+
         for trigger in client.triggers.admin_list_triggers(
             app_id=app_id,
             group_id=project_id,
@@ -105,6 +121,14 @@ def export_triggers(
                     "appId": app_id,
                     "appName": app_name,
                     "trigger": definition,
+                    "function": _associated_function(
+                        client,
+                        definition,
+                        app_id,
+                        project_id,
+                        functions_by_name,
+                        function_cache,
+                    ),
                 }
             )
             apps_with_triggers.add(app_id)
@@ -207,6 +231,64 @@ def _matching_service_ids(
     return matching
 
 
+def _associated_function(
+    client: AppServicesClientLike,
+    trigger: dict[str, Any],
+    app_id: str,
+    project_id: str,
+    functions_by_name: dict[str, str],
+    cache: dict[str, dict[str, Any] | None],
+) -> dict[str, Any] | None:
+    function_id, function_name = _function_reference(trigger)
+    if not function_id and function_name:
+        function_id = functions_by_name.get(function_name)
+    if not function_id:
+        return None
+    if function_id not in cache:
+        raw = client.functions.admin_get_function(
+            app_id=app_id,
+            function_id=function_id,
+            group_id=project_id,
+        )
+        cache[function_id] = _function_definition(raw)
+    return cache[function_id]
+
+
+def _function_reference(trigger: dict[str, Any]) -> tuple[str | None, str | None]:
+    function_id = trigger.get("function_id")
+    function_name = trigger.get("function_name")
+    processors = trigger.get("event_processors")
+    if isinstance(processors, dict):
+        processor = processors.get("FUNCTION")
+        if isinstance(processor, dict):
+            config = processor.get("config")
+            if isinstance(config, dict):
+                if not isinstance(function_id, str) or not function_id:
+                    function_id = config.get("function_id")
+                if not isinstance(function_name, str) or not function_name:
+                    function_name = config.get("function_name")
+
+    valid_id = function_id if isinstance(function_id, str) and function_id else None
+    valid_name = function_name if isinstance(function_name, str) and function_name else None
+    return valid_id, valid_name
+
+
+def _function_definition(function: Any) -> dict[str, Any] | None:
+    if hasattr(function, "model_dump"):
+        raw = function.model_dump(by_alias=True, exclude_none=True, mode="json")
+    elif isinstance(function, dict):
+        raw = dict(function)
+    else:
+        return None
+
+    raw.pop("_id", None)
+    raw.pop("last_modified", None)
+    name = raw.get("name")
+    if not isinstance(name, str) or not name:
+        return None
+    return raw
+
+
 def _trigger_definition(trigger: Any) -> dict[str, Any] | None:
     if hasattr(trigger, "model_dump"):
         raw = trigger.model_dump(by_alias=True, exclude_none=True, mode="json")
@@ -216,6 +298,7 @@ def _trigger_definition(trigger: Any) -> dict[str, Any] | None:
         return None
 
     raw.pop("_id", None)
+    raw.pop("last_modified", None)
     name = raw.get("name")
     if not isinstance(name, str) or not name:
         return None

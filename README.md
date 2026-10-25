@@ -352,10 +352,12 @@ Behavior:
   cluster (matched by cluster name or ID)
 - Keeps only `DATABASE` triggers on those data sources that specify both a database
   and a collection
+- Resolves each trigger's associated function from `function_id`, `function_name`, or
+  `event_processors.FUNCTION`, then fetches the full function definition
 - Writes one file per collection: `<database>.<collection>.json`
-- Removes the server-managed trigger `_id`; all other definition fields are preserved,
-  including `name`, `type`, `disabled`, `config`, `function_id` / `function_name`,
-  and `event_processors`
+- Adds a `function` subdocument next to each `trigger`
+- Removes server-managed `_id` and `last_modified` values from both trigger and
+  function definitions; other definition fields are preserved
 - Includes `appId` and `appName` for each trigger so multiple apps can share a
   collection file
 - Collections without matching triggers produce no file
@@ -392,11 +394,19 @@ Trigger file format:
           "operation_types": ["INSERT"]
         },
         "function_id": "..."
+      },
+      "function": {
+        "name": "on-insert-function",
+        "private": true,
+        "source": "exports = function(changeEvent) { ... };"
       }
     }
   ]
 }
 ```
+
+`function` is `null` if the trigger has no resolvable function. The function source
+code is included so the trigger can be recreated together with its function.
 
 The final summary line also reports the number of contributing apps:
 

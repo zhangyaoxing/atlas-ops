@@ -1381,16 +1381,26 @@ class FakeAppServicesClient:
         apps_by_product: dict[str | None, list[Any]],
         services_by_app: dict[str, list[Any]],
         triggers_by_app: dict[str, list[Any]],
+        functions_by_app: dict[str, list[Any]] | None = None,
+        function_definitions: dict[str, Any] | None = None,
     ) -> None:
         self._apps_by_product = apps_by_product
         self._services_by_app = services_by_app
         self._triggers_by_app = triggers_by_app
+        self._functions_by_app = functions_by_app or {}
+        self._function_definitions = function_definitions or {}
         self.app_calls: list[tuple[str, str | None]] = []
         self.service_calls: list[tuple[str, str]] = []
         self.trigger_calls: list[tuple[str, str]] = []
+        self.function_list_calls: list[tuple[str, str]] = []
+        self.function_get_calls: list[tuple[str, str, str]] = []
         self.apps = SimpleNamespace(admin_list_applications=self._list_apps)
         self.services = SimpleNamespace(admin_list_services=self._list_services)
         self.triggers = SimpleNamespace(admin_list_triggers=self._list_triggers)
+        self.functions = SimpleNamespace(
+            admin_list_functions=self._list_functions,
+            admin_get_function=self._get_function,
+        )
 
     def _list_apps(self, group_id: str, *, product: str | None = None) -> list[Any]:
         self.app_calls.append((group_id, product))
@@ -1403,6 +1413,14 @@ class FakeAppServicesClient:
     def _list_triggers(self, app_id: str, group_id: str) -> list[Any]:
         self.trigger_calls.append((app_id, group_id))
         return self._triggers_by_app.get(app_id, [])
+
+    def _list_functions(self, app_id: str, group_id: str) -> list[Any]:
+        self.function_list_calls.append((app_id, group_id))
+        return self._functions_by_app.get(app_id, [])
+
+    def _get_function(self, app_id: str, function_id: str, group_id: str) -> Any:
+        self.function_get_calls.append((app_id, function_id, group_id))
+        return self._function_definitions[function_id]
 
     def __enter__(self) -> FakeAppServicesClient:
         return self
@@ -1447,6 +1465,7 @@ def test_trigger_exports_definitions(tmp_path: Path, monkeypatch: pytest.MonkeyP
                     "_id": "trigger-1",
                     "name": "on-insert",
                     "type": "DATABASE",
+                    "function_id": "fn-1",
                     "config": {
                         "service_id": "svc-1",
                         "database": "db",
@@ -1454,6 +1473,16 @@ def test_trigger_exports_definitions(tmp_path: Path, monkeypatch: pytest.MonkeyP
                     },
                 }
             ]
+        },
+        functions_by_app={"app-1": [{"_id": "fn-1", "name": "on-insert-function"}]},
+        function_definitions={
+            "fn-1": {
+                "_id": "fn-1",
+                "name": "on-insert-function",
+                "private": True,
+                "source": "exports = function() { return 1; };",
+                "last_modified": 123,
+            }
         },
     )
     monkeypatch.setattr("atlas_ops.cli.app_services_client_from_env", lambda: app_client)
@@ -1483,11 +1512,17 @@ def test_trigger_exports_definitions(tmp_path: Path, monkeypatch: pytest.MonkeyP
                 "trigger": {
                     "name": "on-insert",
                     "type": "DATABASE",
+                    "function_id": "fn-1",
                     "config": {
                         "service_id": "svc-1",
                         "database": "db",
                         "collection": "coll",
                     },
+                },
+                "function": {
+                    "name": "on-insert-function",
+                    "private": True,
+                    "source": "exports = function() { return 1; };",
                 },
             }
         ],
@@ -1495,6 +1530,8 @@ def test_trigger_exports_definitions(tmp_path: Path, monkeypatch: pytest.MonkeyP
     assert app_client.app_calls == [(GROUP_A.id, None), (GROUP_A.id, "atlas")]
     assert app_client.service_calls == [("app-1", GROUP_A.id)]
     assert app_client.trigger_calls == [("app-1", GROUP_A.id)]
+    assert app_client.function_list_calls == [("app-1", GROUP_A.id)]
+    assert app_client.function_get_calls == [("app-1", "fn-1", GROUP_A.id)]
     assert client.created_user_payload is None
     assert "Trigger export summary (1 collection(s)" in result.output
     assert re.search(r"^\| db\.coll\s+\|\s+1 \|$", result.output, re.MULTILINE)

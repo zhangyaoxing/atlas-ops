@@ -34,6 +34,26 @@ class FakeServices:
         return self._services_by_app.get(app_id, [])
 
 
+class FakeFunctions:
+    def __init__(
+        self,
+        metadata_by_app: dict[str, list[Any]],
+        definitions_by_id: dict[str, Any],
+    ) -> None:
+        self._metadata_by_app = metadata_by_app
+        self._definitions_by_id = definitions_by_id
+        self.list_calls: list[tuple[str, str]] = []
+        self.get_calls: list[tuple[str, str, str]] = []
+
+    def admin_list_functions(self, app_id: str, group_id: str) -> list[Any]:
+        self.list_calls.append((app_id, group_id))
+        return self._metadata_by_app.get(app_id, [])
+
+    def admin_get_function(self, app_id: str, function_id: str, group_id: str) -> Any:
+        self.get_calls.append((app_id, function_id, group_id))
+        return self._definitions_by_id[function_id]
+
+
 class FakeTriggers:
     def __init__(self, triggers_by_app: dict[str, list[Any]]) -> None:
         self._triggers_by_app = triggers_by_app
@@ -50,10 +70,16 @@ class FakeClient:
         apps_by_product: dict[str | None, list[Any]],
         services_by_app: dict[str, list[Any]],
         triggers_by_app: dict[str, list[Any]],
+        functions_by_app: dict[str, list[Any]] | None = None,
+        function_definitions: dict[str, Any] | None = None,
     ) -> None:
         self.apps = FakeApps(apps_by_product)
         self.services = FakeServices(services_by_app)
         self.triggers = FakeTriggers(triggers_by_app)
+        self.functions = FakeFunctions(
+            functions_by_app or {},
+            function_definitions or {},
+        )
 
 
 def test_export_filters_by_cluster_and_groups_by_collection(
@@ -105,6 +131,7 @@ def test_export_filters_by_cluster_and_groups_by_collection(
                     "name": "on-update",
                     "type": "DATABASE",
                     "disabled": True,
+                    "function_id": "fn-1",
                     "config": {
                         "service_id": "svc-1",
                         "database": "db",
@@ -116,6 +143,7 @@ def test_export_filters_by_cluster_and_groups_by_collection(
                         "_id": "trigger-1",
                         "name": "on-insert",
                         "type": "DATABASE",
+                        "event_processors": {"FUNCTION": {"config": {"function_name": "fn-two"}}},
                         "config": {
                             "service_id": "svc-1",
                             "database": "db",
@@ -160,6 +188,29 @@ def test_export_filters_by_cluster_and_groups_by_collection(
                 }
             ],
         },
+        functions_by_app={
+            "app-1": [
+                {"_id": "fn-1", "name": "fn-one"},
+                {"_id": "fn-2", "name": "fn-two"},
+            ],
+            "app-3": [],
+        },
+        function_definitions={
+            "fn-1": {
+                "_id": "fn-1",
+                "name": "fn-one",
+                "private": True,
+                "source": "exports = function() { return 1; };",
+                "last_modified": 123,
+            },
+            "fn-2": {
+                "_id": "fn-2",
+                "name": "fn-two",
+                "private": False,
+                "source": "exports = function() { return 2; };",
+                "last_modified": 456,
+            },
+        },
     )
 
     result = export_triggers(
@@ -192,6 +243,18 @@ def test_export_filters_by_cluster_and_groups_by_collection(
     ]
     assert all("_id" not in entry["trigger"] for entry in payload["triggers"])
     assert payload["triggers"][1]["trigger"]["disabled"] is True
+    assert payload["triggers"][0]["function"] == {
+        "name": "fn-two",
+        "private": False,
+        "source": "exports = function() { return 2; };",
+    }
+    assert payload["triggers"][1]["function"] == {
+        "name": "fn-one",
+        "private": True,
+        "source": "exports = function() { return 1; };",
+    }
+    other_payload = json.loads((tmp_path / "other_db.other_coll.json").read_text(encoding="utf-8"))
+    assert other_payload["triggers"][0]["function"] is None
     assert (tmp_path / "other_db.other_coll.json").exists()
     assert client.apps.calls == [
         ("project-1", None),
@@ -206,6 +269,15 @@ def test_export_filters_by_cluster_and_groups_by_collection(
         ("app-3", "project-1"),
         ("app-2", "project-1"),
         ("app-1", "project-1"),
+    ]
+    assert client.functions.list_calls == [
+        ("app-3", "project-1"),
+        ("app-2", "project-1"),
+        ("app-1", "project-1"),
+    ]
+    assert client.functions.get_calls == [
+        ("app-1", "fn-1", "project-1"),
+        ("app-1", "fn-2", "project-1"),
     ]
 
 
