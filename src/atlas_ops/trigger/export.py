@@ -186,9 +186,8 @@ def _matching_service_ids(
         if isinstance(service_type, str) and service_type != "mongodb-atlas":
             continue
 
-        config = service.get("config")
-        if not isinstance(config, dict):
-            continue
+        raw_config = service.get("config")
+        config = raw_config if isinstance(raw_config, dict) else {}
         configured_name = (
             config.get("clusterName") or config.get("cluster_name") or service.get("name")
         )

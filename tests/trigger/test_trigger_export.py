@@ -244,8 +244,8 @@ def test_export_sanitizes_namespace_filename(tmp_path: Path) -> None:
             "app-1": [
                 {
                     "_id": "svc-1",
+                    "name": "cluster0",
                     "type": "mongodb-atlas",
-                    "config": {"clusterName": "cluster0"},
                 }
             ]
         },

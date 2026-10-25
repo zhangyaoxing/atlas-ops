@@ -1436,8 +1436,8 @@ def test_trigger_exports_definitions(tmp_path: Path, monkeypatch: pytest.MonkeyP
             "app-1": [
                 {
                     "_id": "svc-1",
+                    "name": "cluster0",
                     "type": "mongodb-atlas",
-                    "config": {"clusterName": "cluster0"},
                 }
             ]
         },
