@@ -611,7 +611,7 @@ wheels = [
 ]
 
 [[package]]
-name = "sie-atlas-ops"
+name = "atlas-ops"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

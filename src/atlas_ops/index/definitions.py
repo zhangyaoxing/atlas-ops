@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from sie_atlas_ops.errors import IndexDefinitionError
+from atlas_ops.errors import IndexDefinitionError
 
 _TOP_LEVEL_FIELDS = {"database", "collection", "indexes"}
 _INDEX_FIELDS = {"keys", "options", "commitQuorum"}

@@ -11,8 +11,8 @@ from urllib.parse import quote, urlsplit, urlunsplit
 from pymongo import MongoClient
 from pymongo.errors import OperationFailure
 
-from sie_atlas_ops.errors import AtlasOperationError
-from sie_atlas_ops.index.definitions import CollectionIndexes
+from atlas_ops.errors import AtlasOperationError
+from atlas_ops.index.definitions import CollectionIndexes
 
 _DEFAULT_TIMEOUT_MS = 10_000
 _USER_READY_TIMEOUT_SECONDS = 120.0
@@ -79,7 +79,7 @@ def create_client(uri: str, *, timeout_ms: int = _DEFAULT_TIMEOUT_MS) -> MongoCl
         uri,
         serverSelectionTimeoutMS=timeout_ms,
         connectTimeoutMS=timeout_ms,
-        appname="sie-atlas-ops",
+        appname="atlas-ops",
     )
 
 

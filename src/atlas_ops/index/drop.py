@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from sie_atlas_ops.index.mongo import MongoCommandClient
-from sie_atlas_ops.index.plan import ExtraIndex
+from atlas_ops.index.mongo import MongoCommandClient
+from atlas_ops.index.plan import ExtraIndex
 
 
 @dataclass(frozen=True, slots=True)

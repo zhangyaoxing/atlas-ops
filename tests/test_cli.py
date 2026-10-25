@@ -16,8 +16,8 @@ from pyatlassdk.admin.models.cluster_description20240805 import ClusterDescripti
 from pymongo.errors import PyMongoError
 from typer.testing import CliRunner
 
-from sie_atlas_ops import __version__
-from sie_atlas_ops.cli import _format_export_table, app
+from atlas_ops import __version__
+from atlas_ops.cli import _format_export_table, app
 
 runner = CliRunner()
 
@@ -158,7 +158,7 @@ def mongo(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         uris.append(uri)
         return client
 
-    monkeypatch.setattr("sie_atlas_ops.cli.create_client", factory)
+    monkeypatch.setattr("atlas_ops.cli.create_client", factory)
     return SimpleNamespace(client=client, uris=uris)
 
 
@@ -178,7 +178,7 @@ def _write_definitions(directory: Path, name: str = "indexes.json") -> Path:
 
 
 def _patch_client(monkeypatch: pytest.MonkeyPatch, client: FakeAtlasClient) -> None:
-    monkeypatch.setattr("sie_atlas_ops.cli.client_from_env", lambda: client)
+    monkeypatch.setattr("atlas_ops.cli.client_from_env", lambda: client)
 
 
 def _clear_target_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -264,7 +264,7 @@ def test_index_creates_temporary_user(tmp_path: Path, monkeypatch: pytest.Monkey
     assert payload["databaseName"] == "admin"
     assert payload["roles"] == [{"databaseName": "admin", "roleName": "readWriteAnyDatabase"}]
     assert payload["scopes"] == [{"name": "cluster0", "type": "CLUSTER"}]
-    assert payload["username"].startswith("sie_atlas_ops_")
+    assert payload["username"].startswith("atlas_ops_")
     assert len(payload["password"]) >= 8
     json.dumps(payload)  # the body must be JSON-serializable
 
@@ -444,9 +444,9 @@ def test_index_prompts_to_delete_extra_indexes(
         {"v": 2, "key": {"extra": 1}, "name": "extra_1"},
     ]
     mongo_client = FakeMongoClient({"exampleDB": ["example"]}, {("exampleDB", "example"): existing})
-    monkeypatch.setattr("sie_atlas_ops.cli.create_client", lambda uri: mongo_client)
+    monkeypatch.setattr("atlas_ops.cli.create_client", lambda uri: mongo_client)
     handler = _CaptureHandler()
-    package_logger = logging.getLogger("sie_atlas_ops")
+    package_logger = logging.getLogger("atlas_ops")
     package_logger.addHandler(handler)
     try:
         result = runner.invoke(
@@ -483,9 +483,9 @@ def test_index_skips_extra_index_deletion_when_declined(
         {"v": 2, "key": {"extra": 1}, "name": "extra_1"},
     ]
     mongo_client = FakeMongoClient({"exampleDB": ["example"]}, {("exampleDB", "example"): existing})
-    monkeypatch.setattr("sie_atlas_ops.cli.create_client", lambda uri: mongo_client)
+    monkeypatch.setattr("atlas_ops.cli.create_client", lambda uri: mongo_client)
     handler = _CaptureHandler()
-    package_logger = logging.getLogger("sie_atlas_ops")
+    package_logger = logging.getLogger("atlas_ops")
     package_logger.addHandler(handler)
     try:
         result = runner.invoke(
@@ -520,7 +520,7 @@ def test_index_creates_before_dropping_extra_indexes(
         {"v": 2, "key": {"extra": 1}, "name": "extra_1"},
     ]
     mongo_client = FakeMongoClient({"exampleDB": ["example"]}, {("exampleDB", "example"): existing})
-    monkeypatch.setattr("sie_atlas_ops.cli.create_client", lambda uri: mongo_client)
+    monkeypatch.setattr("atlas_ops.cli.create_client", lambda uri: mongo_client)
 
     result = runner.invoke(
         app,
@@ -586,7 +586,7 @@ def test_index_summary_table_counts_per_collection(
             ],
         },
     )
-    monkeypatch.setattr("sie_atlas_ops.cli.create_client", lambda uri: mongo_client)
+    monkeypatch.setattr("atlas_ops.cli.create_client", lambda uri: mongo_client)
 
     result = runner.invoke(
         app,
@@ -620,7 +620,7 @@ def test_index_export_writes_files_without_mutating_indexes(
     mongo_client = FakeMongoClient(
         {"exampleDB": ["example"]}, {("exampleDB", "example"): index_docs}
     )
-    monkeypatch.setattr("sie_atlas_ops.cli.create_client", lambda uri: mongo_client)
+    monkeypatch.setattr("atlas_ops.cli.create_client", lambda uri: mongo_client)
 
     result = runner.invoke(
         app,
@@ -667,7 +667,7 @@ def test_index_prompts_when_collection_missing(
     client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail(standard="mongodb://only"))
     _patch_client(monkeypatch, client)
     missing_client = FakeMongoClient({"exampleDB": []})
-    monkeypatch.setattr("sie_atlas_ops.cli.create_client", lambda uri: missing_client)
+    monkeypatch.setattr("atlas_ops.cli.create_client", lambda uri: missing_client)
 
     result = runner.invoke(
         app,
@@ -688,7 +688,7 @@ def test_index_prompts_when_database_missing(
     client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail(standard="mongodb://only"))
     _patch_client(monkeypatch, client)
     missing_client = FakeMongoClient({})
-    monkeypatch.setattr("sie_atlas_ops.cli.create_client", lambda uri: missing_client)
+    monkeypatch.setattr("atlas_ops.cli.create_client", lambda uri: missing_client)
 
     result = runner.invoke(
         app,
@@ -708,7 +708,7 @@ def test_index_aborts_when_missing_namespace_declined(
     client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail(standard="mongodb://only"))
     _patch_client(monkeypatch, client)
     missing_client = FakeMongoClient({"exampleDB": []})
-    monkeypatch.setattr("sie_atlas_ops.cli.create_client", lambda uri: missing_client)
+    monkeypatch.setattr("atlas_ops.cli.create_client", lambda uri: missing_client)
 
     result = runner.invoke(
         app,
@@ -750,7 +750,7 @@ def test_index_reports_mongo_errors(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     def factory(uri: str) -> FakeMongoClient:
         raise PyMongoError("boom")
 
-    monkeypatch.setattr("sie_atlas_ops.cli.create_client", factory)
+    monkeypatch.setattr("atlas_ops.cli.create_client", factory)
 
     result = runner.invoke(
         app, ["index", str(tmp_path), "--project-id", GROUP_A.id, "--cluster", "cluster0"]
@@ -793,9 +793,9 @@ def test_index_skips_identical_existing_index(
     _patch_client(monkeypatch, client)
     existing = [{"v": 2, "key": {"field": 1}, "name": "field_index"}]
     mongo_client = FakeMongoClient({"exampleDB": ["example"]}, {("exampleDB", "example"): existing})
-    monkeypatch.setattr("sie_atlas_ops.cli.create_client", lambda uri: mongo_client)
+    monkeypatch.setattr("atlas_ops.cli.create_client", lambda uri: mongo_client)
     handler = _CaptureHandler()
-    package_logger = logging.getLogger("sie_atlas_ops")
+    package_logger = logging.getLogger("atlas_ops")
     package_logger.addHandler(handler)
     try:
         result = runner.invoke(
@@ -828,9 +828,9 @@ def test_index_warns_about_existing_index_with_different_options(
         }
     ]
     mongo_client = FakeMongoClient({"exampleDB": ["example"]}, {("exampleDB", "example"): existing})
-    monkeypatch.setattr("sie_atlas_ops.cli.create_client", lambda uri: mongo_client)
+    monkeypatch.setattr("atlas_ops.cli.create_client", lambda uri: mongo_client)
     handler = _CaptureHandler()
-    package_logger = logging.getLogger("sie_atlas_ops")
+    package_logger = logging.getLogger("atlas_ops")
     package_logger.addHandler(handler)
     try:
         result = runner.invoke(
@@ -1053,7 +1053,7 @@ def test_index_validates_definitions_before_calling_atlas(
     )
     called: list[bool] = []
     monkeypatch.setattr(
-        "sie_atlas_ops.cli.client_from_env",
+        "atlas_ops.cli.client_from_env",
         lambda: called.append(True) or pytest.fail("Atlas client must not be created"),
     )
 
@@ -1067,7 +1067,7 @@ def test_index_validates_definitions_before_calling_atlas(
 def test_index_reports_empty_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     called: list[bool] = []
     monkeypatch.setattr(
-        "sie_atlas_ops.cli.client_from_env",
+        "atlas_ops.cli.client_from_env",
         lambda: called.append(True) or pytest.fail("Atlas client must not be created"),
     )
 
@@ -1155,7 +1155,7 @@ def test_index_logs_found_cluster_and_connection_strings(
     )
     _patch_client(monkeypatch, client)
     handler = _CaptureHandler()
-    package_logger = logging.getLogger("sie_atlas_ops")
+    package_logger = logging.getLogger("atlas_ops")
     package_logger.addHandler(handler)
     try:
         result = runner.invoke(
@@ -1193,7 +1193,7 @@ def test_index_logs_lookup_by_id(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail(standard="mongodb://only"))
     _patch_client(monkeypatch, client)
     handler = _CaptureHandler()
-    package_logger = logging.getLogger("sie_atlas_ops")
+    package_logger = logging.getLogger("atlas_ops")
     package_logger.addHandler(handler)
     try:
         result = runner.invoke(
@@ -1215,7 +1215,7 @@ def test_index_logs_when_values_come_from_environment(
     monkeypatch.setenv("ATLAS_PROJECT_ID", GROUP_A.id)
     monkeypatch.setenv("ATLAS_CLUSTER_NAME", "cluster0")
     handler = _CaptureHandler()
-    package_logger = logging.getLogger("sie_atlas_ops")
+    package_logger = logging.getLogger("atlas_ops")
     package_logger.addHandler(handler)
     try:
         result = runner.invoke(app, ["index", str(tmp_path)])

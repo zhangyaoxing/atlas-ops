@@ -4,8 +4,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-from sie_atlas_ops.index.definitions import load_index_definitions
-from sie_atlas_ops.index.export import (
+from atlas_ops.index.definitions import load_index_definitions
+from atlas_ops.index.export import (
     ExportedCollection,
     ExportResult,
     export_indexes,

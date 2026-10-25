@@ -4,7 +4,7 @@ from io import StringIO
 from rich.console import Console
 from rich.logging import RichHandler
 
-from sie_atlas_ops.log import LOGGER_NAME, configure_logging
+from atlas_ops.log import LOGGER_NAME, configure_logging
 
 
 def test_configure_logging_attaches_one_rich_handler() -> None:
@@ -24,7 +24,7 @@ def test_cluster_name_renders_green(monkeypatch) -> None:
     stream = StringIO()
     console = Console(file=stream, force_terminal=True, color_system="standard", width=120)
     handler = RichHandler(console=console, markup=True, show_time=False, show_path=False)
-    logger = logging.getLogger("sie_atlas_ops.test_render")
+    logger = logging.getLogger("atlas_ops.test_render")
     logger.propagate = False
     logger.setLevel(logging.INFO)
     logger.addHandler(handler)

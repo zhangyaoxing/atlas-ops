@@ -1,6 +1,6 @@
-# sie-atlas-ops
+# atlas-ops
 
-Command-line tool for SIE Atlas operations.
+Command-line tool for MongoDB Atlas operations.
 
 ## Requirements
 
@@ -14,7 +14,7 @@ Command-line tool for SIE Atlas operations.
 uv sync
 
 # Run the CLI
-uv run sie-atlas-ops --help
+uv run atlas-ops --help
 ```
 
 ## Configuration
@@ -40,7 +40,7 @@ nearest `.env` and loads it. Variables already exported in the shell take preced
 over file values, so a temporary override can look like this:
 
 ```bash
-ATLAS_PUBLIC_KEY=... ATLAS_PRIVATE_KEY=... uv run sie-atlas-ops index ./examples/indexes \
+ATLAS_PUBLIC_KEY=... ATLAS_PRIVATE_KEY=... uv run atlas-ops index ./examples/indexes \
   --project-id 64f1a2b3c4d5e6f7a8b9c0d1 --cluster cluster0
 ```
 
@@ -63,27 +63,27 @@ collection in all non-system databases are exported as JSON files.
 
 ```bash
 # Project ID + cluster name
-uv run sie-atlas-ops index ./examples/indexes \
+uv run atlas-ops index ./examples/indexes \
   --project-id 64f1a2b3c4d5e6f7a8b9c0d1 --cluster cluster0
 
 # The same options in short form
-uv run sie-atlas-ops index ./examples/indexes \
+uv run atlas-ops index ./examples/indexes \
   -g 64f1a2b3c4d5e6f7a8b9c0d1 -c cluster0
 
 # A cluster ID (24 hexadecimal characters) also works
-uv run sie-atlas-ops index ./examples/indexes \
+uv run atlas-ops index ./examples/indexes \
   --project-id 64f1a2b3c4d5e6f7a8b9c0d1 --cluster b1c2d3e4f5a6b7c8d9e0f1a2
 
 # Read project and cluster from .env / environment variables
-uv run sie-atlas-ops index ./examples/indexes
+uv run atlas-ops index ./examples/indexes
 
 # Use an existing database user and skip temporary-user create/wait/delete
-uv run sie-atlas-ops index ./examples/indexes \
+uv run atlas-ops index ./examples/indexes \
   --project-id 64f1a2b3c4d5e6f7a8b9c0d1 --cluster cluster0 \
   --db-username appUser --db-password '...'
 
 # Export every collection's index definitions to a directory (no create/delete)
-uv run sie-atlas-ops index ./exported-indexes \
+uv run atlas-ops index ./exported-indexes \
   --project-id 64f1a2b3c4d5e6f7a8b9c0d1 --cluster cluster0 --export
 ```
 
@@ -256,7 +256,7 @@ create a temporary database user. Only export mode is implemented so far.
 
 ```bash
 mkdir -p ./exported-search
-uv run sie-atlas-ops search ./exported-search \
+uv run atlas-ops search ./exported-search \
   --project-id 64f1a2b3c4d5e6f7a8b9c0d1 --cluster cluster0 --export
 ```
 
@@ -361,7 +361,7 @@ VS Code:
 
 All configurations use the integrated terminal (`console: integratedTerminal`), so
 interactive CLI prompts work normally. Set breakpoints directly under
-`src/sie_atlas_ops/`; `justMyCode: true` is the default. To step into `pyatlassdk`,
+`src/atlas_ops/`; `justMyCode: true` is the default. To step into `pyatlassdk`,
 set it to `false`.
 
 `.env` is loaded by the program itself, so no extra `envFile` configuration is needed
@@ -399,9 +399,9 @@ source .venv/bin/activate
 │   ├── sample_mflix.theaters.json
 │   └── sample_mflix.users.json
 ├── src/
-│   └── sie_atlas_ops/
+│   └── atlas_ops/
 │       ├── __init__.py               # version
-│       ├── __main__.py               # python -m sie_atlas_ops entry point
+│       ├── __main__.py               # python -m atlas_ops entry point
 │       ├── cli.py                    # Typer app and command definitions
 │       ├── atlas.py                  # credentials, cluster lookup, connection strings
 │       ├── env.py                    # .env loading (search upward, do not override)
@@ -447,7 +447,7 @@ PyPI, this can be replaced with a version constraint.
 
 ## Adding a new command
 
-Add a command in `src/sie_atlas_ops/cli.py`:
+Add a command in `src/atlas_ops/cli.py`:
 
 ```python
 @app.command()
@@ -467,5 +467,5 @@ app.add_typer(users_app, name="users")
 def list_users() -> None: ...
 ```
 
-After adding an entry point, invoke it with `uv run sie-atlas-ops hello World`; no
+After adding an entry point, invoke it with `uv run atlas-ops hello World`; no
 reinstall is needed while the package is installed in editable mode.

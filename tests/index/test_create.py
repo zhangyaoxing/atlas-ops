@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from sie_atlas_ops.index.create import create_indexes, default_index_name
-from sie_atlas_ops.index.definitions import IndexSpec
-from sie_atlas_ops.index.plan import IndexAction, IndexPlanItem
+from atlas_ops.index.create import create_indexes, default_index_name
+from atlas_ops.index.definitions import IndexSpec
+from atlas_ops.index.plan import IndexAction, IndexPlanItem
 
 
 class FakeDatabase:

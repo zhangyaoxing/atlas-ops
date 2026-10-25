@@ -1,4 +1,4 @@
-"""Command-line interface for sie-atlas-ops.
+"""Command-line interface for atlas-ops.
 
 Add new functionality as ``@app.command()`` functions, or group related
 commands into a sub-application:
@@ -26,8 +26,8 @@ from pyatlassdk import AtlasAdminApiError
 from pymongo.errors import PyMongoError
 from rich.markup import escape
 
-from sie_atlas_ops import __version__
-from sie_atlas_ops.atlas import (
+from atlas_ops import __version__
+from atlas_ops.atlas import (
     CLUSTER_NAME_ENV,
     DB_PASSWORD_ENV,
     DB_USERNAME_ENV,
@@ -45,13 +45,13 @@ from sie_atlas_ops.atlas import (
     get_project,
     is_object_id,
 )
-from sie_atlas_ops.env import load_env
-from sie_atlas_ops.errors import AtlasOperationError, ConfigurationError, OpsError
-from sie_atlas_ops.index.create import CreateResult, create_indexes
-from sie_atlas_ops.index.definitions import CollectionIndexes, load_index_definitions
-from sie_atlas_ops.index.drop import DroppedIndex, drop_indexes
-from sie_atlas_ops.index.export import ExportResult, export_indexes
-from sie_atlas_ops.index.mongo import (
+from atlas_ops.env import load_env
+from atlas_ops.errors import AtlasOperationError, ConfigurationError, OpsError
+from atlas_ops.index.create import CreateResult, create_indexes
+from atlas_ops.index.definitions import CollectionIndexes, load_index_definitions
+from atlas_ops.index.drop import DroppedIndex, drop_indexes
+from atlas_ops.index.export import ExportResult, export_indexes
+from atlas_ops.index.mongo import (
     MissingNamespace,
     MongoClientLike,
     build_authenticated_uri,
@@ -59,21 +59,21 @@ from sie_atlas_ops.index.mongo import (
     find_missing_namespaces,
     wait_for_user,
 )
-from sie_atlas_ops.index.plan import (
+from atlas_ops.index.plan import (
     ExtraIndex,
     IndexAction,
     IndexPlan,
     IndexPlanItem,
     plan_indexes,
 )
-from sie_atlas_ops.log import configure_logging
-from sie_atlas_ops.search import SearchExportResult, export_search_indexes
+from atlas_ops.log import configure_logging
+from atlas_ops.search import SearchExportResult, export_search_indexes
 
 logger = logging.getLogger(__name__)
 
 app = typer.Typer(
-    name="sie-atlas-ops",
-    help="Command-line tool for SIE Atlas operations.",
+    name="atlas-ops",
+    help="Command-line tool for MongoDB Atlas operations.",
     no_args_is_help=True,
     add_completion=False,
     rich_markup_mode="rich",
@@ -82,7 +82,7 @@ app = typer.Typer(
 
 def _version_callback(value: bool) -> None:
     if value:
-        typer.echo(f"sie-atlas-ops {__version__}")
+        typer.echo(f"atlas-ops {__version__}")
         raise typer.Exit()
 
 
@@ -97,7 +97,7 @@ def main(
         is_eager=True,
     ),
 ) -> None:
-    """Command-line tool for SIE Atlas operations."""
+    """Command-line tool for MongoDB Atlas operations."""
     env_file = load_env()
     configure_logging()
     if env_file is not None:

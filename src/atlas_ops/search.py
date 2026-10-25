@@ -8,8 +8,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-from sie_atlas_ops.atlas import AtlasRequestClient
-from sie_atlas_ops.filenames import json_filename
+from atlas_ops.atlas import AtlasRequestClient
+from atlas_ops.filenames import json_filename
 
 _SEARCH_ACCEPT = "application/vnd.atlas.2024-05-30+json"
 

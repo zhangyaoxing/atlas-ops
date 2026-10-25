@@ -6,9 +6,9 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from sie_atlas_ops.index.definitions import IndexSpec
-from sie_atlas_ops.index.mongo import MongoCommandClient
-from sie_atlas_ops.index.plan import IndexAction, IndexPlanItem
+from atlas_ops.index.definitions import IndexSpec
+from atlas_ops.index.mongo import MongoCommandClient
+from atlas_ops.index.plan import IndexAction, IndexPlanItem
 
 
 @dataclass(frozen=True, slots=True)

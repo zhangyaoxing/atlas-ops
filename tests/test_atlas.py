@@ -10,7 +10,7 @@ from pyatlassdk import AtlasAdminApiError
 from pyatlassdk.admin.models.cloud_database_user import CloudDatabaseUser
 from pyatlassdk.admin.models.cluster_description20240805 import ClusterDescription20240805
 
-from sie_atlas_ops.atlas import (
+from atlas_ops.atlas import (
     ClusterTarget,
     ConnectionOption,
     ProjectTarget,
@@ -23,7 +23,7 @@ from sie_atlas_ops.atlas import (
     get_project,
     is_object_id,
 )
-from sie_atlas_ops.errors import AtlasOperationError, ConfigurationError
+from atlas_ops.errors import AtlasOperationError, ConfigurationError
 
 GROUP_A = SimpleNamespace(id="a" * 24, name="Project A")
 CLUSTER_A = SimpleNamespace(id="b" * 24, name="cluster0")
@@ -360,7 +360,7 @@ def test_create_temporary_user_generates_credentials() -> None:
 
     user = create_temporary_user(client, PROJECT_A, "cluster0", ttl_hours=1)
 
-    assert user.username.startswith("sie_atlas_ops_")
+    assert user.username.startswith("atlas_ops_")
     assert len(user.password) >= 12
     assert any(char.islower() for char in user.password)
     assert any(char.isupper() for char in user.password)

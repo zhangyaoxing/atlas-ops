@@ -18,7 +18,7 @@ from pyatlassdk.admin.models.database_user_role import DatabaseUserRole
 from pyatlassdk.admin.models.user_scope import UserScope
 from pydantic import BaseModel
 
-from sie_atlas_ops.errors import AtlasOperationError, ConfigurationError
+from atlas_ops.errors import AtlasOperationError, ConfigurationError
 
 PUBLIC_KEY_ENV = "ATLAS_PUBLIC_KEY"
 PRIVATE_KEY_ENV = "ATLAS_PRIVATE_KEY"
@@ -28,7 +28,7 @@ DB_USERNAME_ENV = "ATLAS_DB_USERNAME"
 DB_PASSWORD_ENV = "ATLAS_DB_PASSWORD"
 
 TEMPORARY_USER_TTL_HOURS = 6
-_TEMPORARY_USER_PREFIX = "sie_atlas_ops_"
+_TEMPORARY_USER_PREFIX = "atlas_ops_"
 _PASSWORD_SYMBOLS = "!@#$%^&*"
 _DATABASE_USER_ACCEPT = "application/vnd.atlas.2023-01-01+json"
 

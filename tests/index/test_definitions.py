@@ -3,8 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from sie_atlas_ops.errors import IndexDefinitionError
-from sie_atlas_ops.index.definitions import load_index_definitions
+from atlas_ops.errors import IndexDefinitionError
+from atlas_ops.index.definitions import load_index_definitions
 
 
 def _write(directory: Path, name: str, payload: object) -> Path:

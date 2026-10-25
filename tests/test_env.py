@@ -6,9 +6,9 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from sie_atlas_ops.atlas import client_from_env
-from sie_atlas_ops.cli import app
-from sie_atlas_ops.env import load_env
+from atlas_ops.atlas import client_from_env
+from atlas_ops.cli import app
+from atlas_ops.env import load_env
 
 
 def _write_env(directory: Path, content: str) -> Path:
@@ -56,7 +56,7 @@ def test_shell_environment_takes_precedence(monkeypatch: pytest.MonkeyPatch) -> 
 
 def test_returns_none_when_no_dotenv_exists(monkeypatch: pytest.MonkeyPatch) -> None:
     _clear_credentials(monkeypatch)
-    monkeypatch.setattr("sie_atlas_ops.env.find_dotenv", lambda **_: "")
+    monkeypatch.setattr("atlas_ops.env.find_dotenv", lambda **_: "")
 
     assert load_env() is None
     assert "ATLAS_PUBLIC_KEY" not in os.environ
@@ -76,7 +76,7 @@ def test_loaded_values_are_accepted_by_client(monkeypatch: pytest.MonkeyPatch) -
 
 def test_cli_loads_dotenv_before_running_commands(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[bool] = []
-    monkeypatch.setattr("sie_atlas_ops.cli.load_env", lambda: calls.append(True) or None)
+    monkeypatch.setattr("atlas_ops.cli.load_env", lambda: calls.append(True) or None)
 
     result = CliRunner().invoke(app, ["version"])
 

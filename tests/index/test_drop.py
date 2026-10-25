@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from sie_atlas_ops.index.drop import drop_indexes
-from sie_atlas_ops.index.plan import ExtraIndex
+from atlas_ops.index.drop import drop_indexes
+from atlas_ops.index.plan import ExtraIndex
 
 
 class FakeDatabase:

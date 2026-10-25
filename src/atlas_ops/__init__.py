@@ -1,4 +1,4 @@
-"""SIE Atlas operations CLI."""
+"""MongoDB Atlas operations CLI."""
 
 __all__ = ["__version__"]
 

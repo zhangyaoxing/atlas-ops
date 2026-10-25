@@ -12,7 +12,7 @@ import logging
 from rich.console import Console
 from rich.logging import RichHandler
 
-LOGGER_NAME = "sie_atlas_ops"
+LOGGER_NAME = "atlas_ops"
 
 
 def configure_logging(level: int = logging.INFO) -> None:

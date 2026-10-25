@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
-from sie_atlas_ops.index.definitions import CollectionIndexes, IndexSpec
-from sie_atlas_ops.index.mongo import MissingNamespace, MongoCommandClient
+from atlas_ops.index.definitions import CollectionIndexes, IndexSpec
+from atlas_ops.index.mongo import MissingNamespace, MongoCommandClient
 
 
 class IndexAction(str, Enum):

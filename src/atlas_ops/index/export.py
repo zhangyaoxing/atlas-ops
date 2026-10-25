@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from sie_atlas_ops.filenames import json_filename
-from sie_atlas_ops.index.mongo import MongoReadClient
+from atlas_ops.filenames import json_filename
+from atlas_ops.index.mongo import MongoReadClient
 
 _SYSTEM_DATABASES = {"admin", "local", "config"}
 _SERVER_FIELDS = {"v", "key", "ns"}

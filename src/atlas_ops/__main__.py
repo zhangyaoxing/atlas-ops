@@ -1,4 +1,4 @@
-from sie_atlas_ops.cli import app
+from atlas_ops.cli import app
 
 if __name__ == "__main__":
     app()
