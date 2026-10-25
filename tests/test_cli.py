@@ -1373,3 +1373,131 @@ def test_search_uses_environment_targets(tmp_path: Path, monkeypatch: pytest.Mon
         f"/groups/{GROUP_A.id}/clusters/cluster0/search/indexes"
     )
     assert "Exported 0 search index(es) from 0 collection(s)" in result.output
+
+
+class FakeAppServicesClient:
+    def __init__(
+        self,
+        apps_by_product: dict[str | None, list[Any]],
+        triggers_by_app: dict[str, list[Any]],
+    ) -> None:
+        self._apps_by_product = apps_by_product
+        self._triggers_by_app = triggers_by_app
+        self.app_calls: list[tuple[str, str | None]] = []
+        self.trigger_calls: list[tuple[str, str]] = []
+        self.apps = SimpleNamespace(admin_list_applications=self._list_apps)
+        self.triggers = SimpleNamespace(admin_list_triggers=self._list_triggers)
+
+    def _list_apps(self, group_id: str, *, product: str | None = None) -> list[Any]:
+        self.app_calls.append((group_id, product))
+        return self._apps_by_product.get(product, [])
+
+    def _list_triggers(self, app_id: str, group_id: str) -> list[Any]:
+        self.trigger_calls.append((app_id, group_id))
+        return self._triggers_by_app.get(app_id, [])
+
+    def __enter__(self) -> FakeAppServicesClient:
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        return None
+
+
+def test_trigger_help_documents_arguments() -> None:
+    result = runner.invoke(app, ["trigger", "--help"])
+
+    assert result.exit_code == 0
+    assert "directory" in result.stdout
+    assert "--project-id" in result.stdout
+    assert "-g" in result.stdout
+    assert "--export" in result.stdout
+    assert "-e" in result.stdout
+
+
+def test_trigger_exports_definitions(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    client = FakeAtlasClient([GROUP_A], {}, _detail())
+    _patch_client(monkeypatch, client)
+    app_client = FakeAppServicesClient(
+        {
+            None: [SimpleNamespace(id="app-1", name="my-app")],
+            "atlas": [],
+        },
+        {
+            "app-1": [
+                {
+                    "_id": "trigger-1",
+                    "name": "on-insert",
+                    "type": "DATABASE",
+                    "config": {"database": "db", "collection": "coll"},
+                }
+            ]
+        },
+    )
+    monkeypatch.setattr("atlas_ops.cli.app_services_client_from_env", lambda: app_client)
+
+    result = runner.invoke(
+        app,
+        ["trigger", str(tmp_path), "-g", GROUP_A.id, "-e"],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads((tmp_path / "my-app.json").read_text(encoding="utf-8"))
+    assert payload == {
+        "appId": "app-1",
+        "appName": "my-app",
+        "triggers": [
+            {
+                "name": "on-insert",
+                "type": "DATABASE",
+                "config": {"database": "db", "collection": "coll"},
+            }
+        ],
+    }
+    assert app_client.app_calls == [(GROUP_A.id, None), (GROUP_A.id, "atlas")]
+    assert app_client.trigger_calls == [("app-1", GROUP_A.id)]
+    assert client.created_user_payload is None
+    assert "Trigger export summary (1 app(s)" in result.output
+    assert re.search(r"^\| my-app\s+\|\s+1 \|$", result.output, re.MULTILINE)
+    assert re.search(
+        r"^\| \*\*Total\*\*\s+\|\s+\*\*1\*\* \|$",
+        result.output,
+        re.MULTILINE,
+    )
+    assert "Exported 1 trigger(s) from 1 app(s)" in result.output
+
+
+def test_trigger_requires_export(tmp_path: Path) -> None:
+    result = runner.invoke(app, ["trigger", str(tmp_path), "-g", GROUP_A.id])
+
+    assert result.exit_code == 1
+    assert "only --export/-e" in result.output
+
+
+def test_trigger_reports_missing_credentials(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("ATLAS_PUBLIC_KEY", raising=False)
+    monkeypatch.delenv("ATLAS_PRIVATE_KEY", raising=False)
+    _clear_target_env(monkeypatch)
+
+    result = runner.invoke(app, ["trigger", str(tmp_path), "--export"])
+
+    assert result.exit_code == 1
+    assert "ATLAS_PUBLIC_KEY" in result.output
+    assert "ATLAS_PRIVATE_KEY" in result.output
+    assert "Project ID (24 hexadecimal characters)" not in result.output
+
+
+def test_trigger_uses_environment_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    client = FakeAtlasClient([GROUP_A], {}, _detail())
+    _patch_client(monkeypatch, client)
+    app_client = FakeAppServicesClient({None: [], "atlas": []}, {})
+    monkeypatch.setattr("atlas_ops.cli.app_services_client_from_env", lambda: app_client)
+    monkeypatch.setenv("ATLAS_PROJECT_ID", GROUP_A.id)
+
+    result = runner.invoke(app, ["trigger", str(tmp_path), "--export"])
+
+    assert result.exit_code == 0, result.output
+    assert client.get_group_calls == [GROUP_A.id]
+    assert app_client.app_calls == [(GROUP_A.id, None), (GROUP_A.id, "atlas")]
+    assert "Exported 0 trigger(s) from 0 app(s)" in result.output

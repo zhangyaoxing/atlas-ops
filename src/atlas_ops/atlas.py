@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Protocol
 from urllib.parse import quote
 
-from pyatlassdk import AtlasAdminApiError, AtlasAdminClient
+from pyatlassdk import AtlasAdminApiError, AtlasAdminClient, AtlasAppAdminClient
 from pyatlassdk.admin.models.cloud_database_user import CloudDatabaseUser
 from pyatlassdk.admin.models.database_user_role import DatabaseUserRole
 from pyatlassdk.admin.models.user_scope import UserScope
@@ -85,6 +85,13 @@ class ConnectionStringsCluster(Protocol):
     connection_strings: Any
 
 
+class AtlasErrorLike(Protocol):
+    """Shared shape of Atlas admin and App Services API errors."""
+
+    status_code: int
+    payload: Any
+
+
 @dataclass(frozen=True, slots=True)
 class ProjectTarget:
     """An Atlas project resolved by ID."""
@@ -125,8 +132,9 @@ def is_object_id(value: str) -> bool:
     return bool(_OBJECT_ID_PATTERN.fullmatch(value))
 
 
-def client_from_env(environ: Mapping[str, str] | None = None) -> AtlasAdminClient:
-    """Build an Atlas client from ``ATLAS_PUBLIC_KEY``/``ATLAS_PRIVATE_KEY``."""
+def _api_credentials(
+    environ: Mapping[str, str] | None = None,
+) -> tuple[str, str]:
     env = os.environ if environ is None else environ
     missing = [name for name in (PUBLIC_KEY_ENV, PRIVATE_KEY_ENV) if not env.get(name, "").strip()]
     if missing:
@@ -135,9 +143,23 @@ def client_from_env(environ: Mapping[str, str] | None = None) -> AtlasAdminClien
             "in the environment or in a .env file. "
             "Use the public and private key of an Atlas API key."
         )
-    return AtlasAdminClient(
-        public_key=env[PUBLIC_KEY_ENV].strip(),
-        private_key=env[PRIVATE_KEY_ENV].strip(),
+    return env[PUBLIC_KEY_ENV].strip(), env[PRIVATE_KEY_ENV].strip()
+
+
+def client_from_env(environ: Mapping[str, str] | None = None) -> AtlasAdminClient:
+    """Build an Atlas Administration client from Atlas API keys."""
+    public_key, private_key = _api_credentials(environ)
+    return AtlasAdminClient(public_key=public_key, private_key=private_key)
+
+
+def app_services_client_from_env(
+    environ: Mapping[str, str] | None = None,
+) -> AtlasAppAdminClient:
+    """Log in to the App Services Admin API with Atlas API keys."""
+    public_key, private_key = _api_credentials(environ)
+    return AtlasAppAdminClient.login(
+        username=public_key,
+        api_key=private_key,
     )
 
 
@@ -311,7 +333,7 @@ def _generate_password(length: int = 24) -> str:
             return candidate
 
 
-def describe_atlas_error(exc: AtlasAdminApiError) -> str:
+def describe_atlas_error(exc: AtlasErrorLike) -> str:
     """Turn an SDK error into a compact message for CLI output."""
     detail = ""
     if isinstance(exc.payload, dict):

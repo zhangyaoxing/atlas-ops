@@ -22,7 +22,7 @@ from typing import NoReturn
 
 import httpx
 import typer
-from pyatlassdk import AtlasAdminApiError
+from pyatlassdk import AtlasAdminApiError, AtlasAppApiError
 from pymongo.errors import PyMongoError
 from rich.markup import escape
 
@@ -35,7 +35,9 @@ from atlas_ops.atlas import (
     AtlasClientLike,
     ClusterTarget,
     ConnectionOption,
+    ProjectTarget,
     TemporaryUser,
+    app_services_client_from_env,
     client_from_env,
     connection_options,
     create_temporary_user,
@@ -68,6 +70,7 @@ from atlas_ops.index.plan import (
 )
 from atlas_ops.log import configure_logging
 from atlas_ops.search import SearchExportResult, export_search_indexes
+from atlas_ops.trigger import TriggerExportResult, export_triggers
 
 logger = logging.getLogger(__name__)
 
@@ -391,15 +394,89 @@ def search(
     _print_search_export_summary(directory, target, result)
 
 
-def _resolve_references(project: str | None, cluster: str | None) -> tuple[str, str]:
-    """Resolve the project and cluster from options, environment, or prompts."""
-    project_ref = (project or "").strip()
-    cluster_ref = (cluster or "").strip()
+@app.command()
+def trigger(
+    directory: Path = typer.Argument(
+        ...,
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        readable=True,
+        resolve_path=True,
+        help="Directory for exported trigger JSON files.",
+    ),
+    project: str | None = typer.Option(
+        None,
+        "--project-id",
+        "-g",
+        help=(
+            "Atlas project ID (24 hexadecimal characters). "
+            f"Falls back to {PROJECT_ID_ENV}, then prompts."
+        ),
+    ),
+    export: bool = typer.Option(
+        False,
+        "--export",
+        "-e",
+        help="Export all App Services trigger definitions to DIRECTORY.",
+    ),
+) -> None:
+    """Export all App Services trigger definitions for one project.
 
+    Uses the App Services Admin API client and only needs Atlas API
+    credentials plus the project ID. No cluster selection, MongoDB
+    connection, or temporary database user is involved.
+    """
+    target: ProjectTarget | None = None
+    result: TriggerExportResult | None = None
+    try:
+        if not export:
+            raise AtlasOperationError("The trigger command currently supports only --export/-e.")
+        with client_from_env() as client:
+            project_id = _resolve_project(project)
+            target = get_project(client, project_id)
+        with app_services_client_from_env() as app_client:
+            logger.info("Exporting trigger definitions to %s...", directory)
+            result = export_triggers(app_client, project_id, directory)
+            logger.info(
+                "Exported %d trigger(s) from %d app(s).",
+                result.triggers,
+                result.files,
+            )
+    except OpsError as exc:
+        _fail(str(exc))
+    except (AtlasAdminApiError, AtlasAppApiError) as exc:
+        _fail(describe_atlas_error(exc))
+    except OSError as exc:
+        _fail(f"Could not write exported triggers: {exc}")
+    except httpx.HTTPError as exc:
+        _fail(f"Could not reach the Atlas API: {exc}")
+
+    assert target is not None
+    assert result is not None
+    _print_trigger_export_summary(directory, target, result)
+
+
+def _resolve_project(project: str | None) -> str:
+    """Resolve the project from the option, environment, or a prompt."""
+    project_ref = (project or "").strip()
     if not project_ref:
         project_ref = os.environ.get(PROJECT_ID_ENV, "").strip()
         if project_ref:
             logger.info("Using project %s from %s", project_ref, PROJECT_ID_ENV)
+    if not project_ref:
+        project_ref = _prompt_project()
+    if not is_object_id(project_ref):
+        raise AtlasOperationError(
+            f"Invalid project ID {project_ref!r}: expected 24 hexadecimal characters."
+        )
+    return project_ref
+
+
+def _resolve_references(project: str | None, cluster: str | None) -> tuple[str, str]:
+    """Resolve the project and cluster from options, environment, or prompts."""
+    project_ref = _resolve_project(project)
+    cluster_ref = (cluster or "").strip()
     if not cluster_ref:
         cluster_ref = os.environ.get(CLUSTER_NAME_ENV, "").strip()
         if cluster_ref:
@@ -408,16 +485,8 @@ def _resolve_references(project: str | None, cluster: str | None) -> tuple[str, 
                 escape(cluster_ref),
                 CLUSTER_NAME_ENV,
             )
-
-    if not project_ref:
-        project_ref = _prompt_project()
     if not cluster_ref:
         cluster_ref = _prompt_cluster()
-
-    if not is_object_id(project_ref):
-        raise AtlasOperationError(
-            f"Invalid project ID {project_ref!r}: expected 24 hexadecimal characters."
-        )
     return project_ref, cluster_ref
 
 
@@ -732,8 +801,8 @@ def _print_export_summary(
     )
 
 
-def _format_export_table(rows: list[tuple[str, int]]) -> str:
-    header = ("Collection", "Exported")
+def _format_export_table(rows: list[tuple[str, int]], first_header: str = "Collection") -> str:
+    header = (first_header, "Exported")
     total = ("**Total**", f"**{sum(count for _, count in rows)}**")
     body = [(_markdown_cell(namespace), str(count)) for namespace, count in rows]
     widths = [
@@ -774,6 +843,23 @@ def _print_search_export_summary(
         f"Exported {result.indexes} search index(es) from {result.files} "
         f"collection(s) to {directory}."
     )
+
+
+def _print_trigger_export_summary(
+    directory: Path,
+    target: ProjectTarget,
+    result: TriggerExportResult,
+) -> None:
+    typer.echo("")
+    typer.echo(f"Project:    {target.project_name} ({target.project_id})")
+    typer.echo("")
+
+    rows = [(app.app_name, app.triggers) for app in result.apps]
+    typer.echo(f"Trigger export summary ({result.files} app(s) from {directory}):")
+    typer.echo("")
+    typer.echo(_format_export_table(rows, first_header="App"))
+    typer.echo("")
+    typer.echo(f"Exported {result.triggers} trigger(s) from {result.files} app(s) to {directory}.")
 
 
 def _format_utc(value: datetime) -> str:

@@ -319,6 +319,74 @@ Behavior:
 No `--db-username` / `--db-password` options are needed; the command never opens a
 MongoDB connection.
 
+### `trigger`
+
+Export all App Services trigger definitions for one project. The command uses the
+SDK's App Services Admin client (`AtlasAppAdminClient`), so it needs only Atlas API
+credentials and a project ID. It does not select a cluster, connect to MongoDB, or
+create a temporary database user. Only export mode is implemented so far.
+
+```bash
+mkdir -p ./exported-triggers
+uv run atlas-ops trigger ./exported-triggers \
+  --project-id 64f1a2b3c4d5e6f7a8b9c0d1 --export
+```
+
+Arguments:
+
+- `DIRECTORY`: output directory for trigger JSON files (must already exist)
+
+Options:
+
+- `-g, --project-id`: project ID; falls back to `ATLAS_PROJECT_ID`, then prompts
+- `-e, --export`: export mode; required for now
+
+Behavior:
+
+- Logs in to the App Services Admin API with the Atlas API key pair
+- Scans both standard apps and the special `atlas` product app
+- Writes one file per app with triggers: `<app>.json`
+- Removes the server-managed trigger `_id`; all other trigger definition fields are
+  preserved, including `name`, `type`, `disabled`, `config`, `function_id` /
+  `function_name`, and `event_processors`
+- Apps without triggers produce no file
+- Unsafe filename characters are replaced with `_`
+- The run ends with a per-app Markdown table and total count:
+
+  ```text
+  Trigger export summary (1 app(s) from /path/to/exported-triggers):
+
+  | App       | Exported |
+  | --------- | -------: |
+  | my-app    |        2 |
+  | **Total** |    **2** |
+  ```
+
+Trigger file format:
+
+```json
+{
+  "appId": "65f1a2b3c4d5e6f7a8b9c0d1",
+  "appName": "my-app",
+  "triggers": [
+    {
+      "name": "on-insert",
+      "type": "DATABASE",
+      "disabled": false,
+      "config": {
+        "database": "exampleDB",
+        "collection": "example",
+        "operation_types": ["INSERT"]
+      },
+      "function_id": "..."
+    }
+  ]
+}
+```
+
+The Atlas API key needs App Services admin access for the project, for example
+Project Owner.
+
 ## Logging
 
 Logs use the standard-library `logging` module with
@@ -415,6 +483,7 @@ source .venv/bin/activate
 │       │   ├── mongo.py              # MongoDB connection, auth URI, namespace checks
 │       │   └── plan.py               # index/option comparison and extra-index detection
 │       ├── search.py                 # export Atlas Search index definitions
+│       ├── trigger.py                # export App Services trigger definitions
 │       ├── log.py                    # logging config (RichHandler, stderr)
 │       └── errors.py                 # user-facing error types
 └── tests/
@@ -430,7 +499,8 @@ source .venv/bin/activate
     ├── test_atlas.py                 # Atlas helper tests
     ├── test_env.py                   # .env loading tests
     ├── test_log.py                   # color/logging configuration tests
-    └── test_search.py                # Atlas Search export tests
+    ├── test_search.py                # Atlas Search export tests
+    └── test_trigger.py               # App Services trigger export tests
 ```
 
 ## Dependencies
