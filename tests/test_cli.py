@@ -496,7 +496,7 @@ def test_index_prompts_to_delete_extra_indexes(
         package_logger.removeHandler(handler)
 
     assert result.exit_code == 0, result.output
-    assert any("not present in the definitions" in message for message in handler.messages)
+    assert not any("not present in the definitions" in message for message in handler.messages)
     assert "Index change preview" in result.output
     assert re.search(
         r"^\| exampleDB\.example \|\s+0 \|\s+1 \|\s+1 \|$",

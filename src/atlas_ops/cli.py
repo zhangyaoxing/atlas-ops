@@ -281,8 +281,6 @@ def index(
                                 raise typer.Exit(code=1)
                         plan = plan_indexes(mongo_client, definitions, missing)
                         _log_index_plan(plan.items)
-                        if plan.extras:
-                            _log_extra_indexes(plan.extras)
                         _print_index_preview(directory, definitions, plan)
                         has_changes = bool(plan.extras) or any(
                             item.action is IndexAction.CREATE for item in plan.items
@@ -656,17 +654,6 @@ def _log_created(created: list[CreateResult]) -> None:
             escape(result.database),
             escape(result.collection),
             escape(", ".join(result.names)),
-        )
-
-
-def _log_extra_indexes(extras: tuple[ExtraIndex, ...]) -> None:
-    for extra in extras:
-        logger.warning(
-            'Index "%s" on "%s.%s" is not present in the definitions (keys %s).',
-            escape(extra.name),
-            escape(extra.database),
-            escape(extra.collection),
-            escape(json.dumps(extra.keys)),
         )
 
 
