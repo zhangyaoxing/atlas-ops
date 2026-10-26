@@ -942,14 +942,7 @@ def _markdown_cell(value: object) -> str:
 
 def _log_search_plan(plan: SearchPlan) -> None:
     for item in plan.items:
-        if item.action is SearchAction.CREATE:
-            logger.info(
-                'Will create search index "%s" on "%s.%s".',
-                escape(item.spec.name),
-                escape(item.database),
-                escape(item.collection),
-            )
-        elif item.action is SearchAction.UPDATE:
+        if item.action is SearchAction.UPDATE:
             logger.info(
                 'Will update search index "%s" on "%s.%s".',
                 escape(item.spec.name),

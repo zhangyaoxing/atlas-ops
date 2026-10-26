@@ -1701,6 +1701,7 @@ def test_search_syncs_definitions_and_deletes_extras(
 
     assert result.exit_code == 0, result.output
     assert "Search change preview" in result.output
+    assert "Will create search index" not in result.output
     assert "Delete the 1 search index(es)" not in result.output
     assert [call["body"].name for call in client.search_create_calls] == ["new"]
     created = client.search_create_calls[0]["body"].model_dump(by_alias=True, exclude_none=True)
