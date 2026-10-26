@@ -191,10 +191,10 @@ def index(
     credentials are used when supplied; otherwise a cluster-scoped temporary
     database user is created, expires after six hours, and is deleted on every
     exit path. Missing databases and collections are reported and confirmed,
-    existing indexes are compared by key pattern and options, and the remaining
-    indexes are created. Existing indexes whose key pattern is not declared are
-    reported and, on confirmation, dropped. With ``--export``, existing indexes
-    are instead exported to DIRECTORY and no index is created or dropped.
+    existing indexes are compared by key pattern and options, and a preview
+    table is printed. After the preview is confirmed, missing indexes are
+    created and undeclared indexes are dropped. With ``--export``, existing
+    indexes are instead exported to DIRECTORY and no index is created or dropped.
     """
     try:
         provided_credentials = _resolve_db_credentials(db_username, db_password)
@@ -281,23 +281,24 @@ def index(
                                 raise typer.Exit(code=1)
                         plan = plan_indexes(mongo_client, definitions, missing)
                         _log_index_plan(plan.items)
-                        delete_extras = False
                         if plan.extras:
                             _log_extra_indexes(plan.extras)
-                            delete_extras = typer.confirm(
-                                f"Delete the {len(plan.extras)} index(es) that are "
-                                "not present in the definitions?",
-                                default=False,
-                            )
-                            if not delete_extras:
-                                logger.info("Skipping deletion of undefined indexes.")
+                        _print_index_preview(directory, definitions, plan)
+                        has_changes = bool(plan.extras) or any(
+                            item.action is IndexAction.CREATE for item in plan.items
+                        )
+                        if not has_changes:
+                            typer.echo("No changes to apply.")
+                        elif not _confirm_changes():
+                            typer.echo("Aborted.")
+                            raise typer.Exit(code=1)
                         pending = sum(1 for item in plan.items if item.action is IndexAction.CREATE)
                         if pending:
                             logger.info("Creating %d index(es)...", pending)
+                        if plan.extras:
+                            logger.info("Deleting %d index(es)...", len(plan.extras))
                         created = create_indexes(mongo_client, plan.items)
-                        dropped = []
-                        if delete_extras:
-                            dropped = drop_indexes(mongo_client, list(plan.extras))
+                        dropped = drop_indexes(mongo_client, list(plan.extras))
                 finally:
                     mongo_client.close()
 
@@ -367,8 +368,9 @@ def search(
 
     By default, local JSON definitions in DIRECTORY are compared with the
     cluster: missing indexes are created, changed definitions are updated,
-    unchanged indexes are skipped, and undeclared remote indexes are offered
-    for deletion. With ``--export``, definitions are written instead.
+    unchanged indexes are skipped, and undeclared remote indexes are planned for
+    deletion. A preview table is printed and must be confirmed before any change
+    is applied. With ``--export``, definitions are written instead.
 
     The cluster-wide Search index endpoint is used, so the command needs only
     Atlas API credentials and the project/cluster. No MongoDB connection or
@@ -409,22 +411,23 @@ def search(
                 remote = fetch_search_indexes(client, project_id, target.cluster_name)
                 sync_plan = plan_search_indexes(remote, definitions)
                 _log_search_plan(sync_plan)
-                delete_extras = False
                 if sync_plan.extras:
                     _log_search_extras(sync_plan.extras)
-                    delete_extras = typer.confirm(
-                        f"Delete the {len(sync_plan.extras)} search index(es) "
-                        "that are not present in the definitions?",
-                        default=False,
-                    )
-                    if not delete_extras:
-                        logger.info("Skipping deletion of undefined search indexes.")
+                _print_search_preview(directory, definitions, sync_plan)
+                has_changes = bool(sync_plan.extras) or any(
+                    item.action is not SearchAction.IDENTICAL for item in sync_plan.items
+                )
+                if not has_changes:
+                    typer.echo("No changes to apply.")
+                elif not _confirm_changes():
+                    typer.echo("Aborted.")
+                    raise typer.Exit(code=1)
                 sync_result = apply_search_plan(
                     client,
                     project_id,
                     target.cluster_name,
                     sync_plan,
-                    delete_extras=delete_extras,
+                    delete_extras=True,
                 )
                 logger.info(
                     "Search sync complete: %d created, %d updated, %d deleted.",
@@ -766,6 +769,23 @@ def _prompt_choice(count: int, label: str) -> int:
         typer.secho(f"Enter a number between 1 and {count}.", fg=typer.colors.YELLOW, err=True)
 
 
+def _confirm_changes() -> bool:
+    return typer.confirm("Proceed with these changes?", default=False)
+
+
+def _print_index_preview(
+    directory: Path,
+    definitions: list[CollectionIndexes],
+    plan: IndexPlan,
+) -> None:
+    rows = _collection_summary(definitions, plan, plan.extras)
+    typer.echo("")
+    typer.echo(f"Index change preview ({len(rows)} collection(s) from {directory}):")
+    typer.echo("")
+    typer.echo(_format_index_table(rows))
+    typer.echo("")
+
+
 def _print_summary(
     directory: Path,
     definitions: list[CollectionIndexes],
@@ -802,7 +822,7 @@ def _print_summary(
 def _collection_summary(
     definitions: list[CollectionIndexes],
     plan: IndexPlan,
-    dropped: list[DroppedIndex],
+    dropped: Sequence[ExtraIndex | DroppedIndex],
 ) -> list[tuple[str, int, int, int]]:
     counts: dict[tuple[str, str], list[int]] = {}
     order: list[tuple[str, str]] = []
@@ -955,13 +975,11 @@ def _log_search_extras(extras: tuple[SearchExtra, ...]) -> None:
         )
 
 
-def _print_search_sync_summary(
-    directory: Path,
-    target: ClusterTarget,
+def _search_sync_rows(
     definitions: list[SearchCollectionIndexes],
     plan: SearchPlan,
-    result: SearchApplyResult,
-) -> None:
+    deleted_extras: Sequence[SearchExtra],
+) -> list[tuple[str, int, int, int, int]]:
     counts: dict[tuple[str, str], list[int]] = {}
     order: list[tuple[str, str]] = []
     for definition in definitions:
@@ -978,21 +996,54 @@ def _print_search_sync_summary(
             counts[key][1] += 1
         else:
             counts[key][2] += 1
-    for extra in result.deleted_extras:
+    for extra in deleted_extras:
         counts[(extra.database, extra.collection)][3] += 1
 
     rows: list[tuple[str, int, int, int, int]] = []
     for database, collection in order:
         created, updated, unchanged, deleted = counts[(database, collection)]
         rows.append((f"{database}.{collection}", created, updated, unchanged, deleted))
-    skipped = sum(row[3] for row in rows)
+    return rows
+
+
+def _format_search_sync_table(rows: Sequence[tuple[str, int, int, int, int]]) -> str:
     total = (
         "**Total**",
-        f"**{result.created}**",
-        f"**{result.updated}**",
-        f"**{skipped}**",
-        f"**{result.deleted}**",
+        f"**{sum(row[1] for row in rows)}**",
+        f"**{sum(row[2] for row in rows)}**",
+        f"**{sum(row[3] for row in rows)}**",
+        f"**{sum(row[4] for row in rows)}**",
     )
+    return _format_markdown_table(
+        ("Collection", "Created", "Updated", "Skipped", "Deleted"),
+        rows,
+        total,
+        numeric_columns={1, 2, 3, 4},
+    )
+
+
+def _print_search_preview(
+    directory: Path,
+    definitions: list[SearchCollectionIndexes],
+    plan: SearchPlan,
+) -> None:
+    rows = _search_sync_rows(definitions, plan, plan.extras)
+    typer.echo("")
+    typer.echo(f"Search change preview ({len(rows)} collection(s) from {directory}):")
+    typer.echo("")
+    typer.echo(_format_search_sync_table(rows))
+    typer.echo("")
+
+
+def _print_search_sync_summary(
+    directory: Path,
+    target: ClusterTarget,
+    definitions: list[SearchCollectionIndexes],
+    plan: SearchPlan,
+    result: SearchApplyResult,
+) -> None:
+    rows = _search_sync_rows(definitions, plan, result.deleted_extras)
+    skipped = sum(row[3] for row in rows)
 
     typer.echo("")
     typer.echo(f"Cluster:    {target.cluster_name} ({target.cluster_id or 'unknown ID'})")
@@ -1000,14 +1051,7 @@ def _print_search_sync_summary(
     typer.echo("")
     typer.echo(f"Search sync summary ({len(rows)} collection(s) from {directory}):")
     typer.echo("")
-    typer.echo(
-        _format_markdown_table(
-            ("Collection", "Created", "Updated", "Skipped", "Deleted"),
-            rows,
-            total,
-            numeric_columns={1, 2, 3, 4},
-        )
-    )
+    typer.echo(_format_search_sync_table(rows))
     typer.echo("")
     typer.echo(
         f"Search sync complete: {result.created} created, {result.updated} updated, "

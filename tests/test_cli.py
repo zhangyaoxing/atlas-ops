@@ -182,6 +182,12 @@ def mongo(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     return SimpleNamespace(client=client, uris=uris)
 
 
+@pytest.fixture(autouse=True)
+def confirm_changes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Approve the change preview unless a test overrides it."""
+    monkeypatch.setattr("atlas_ops.cli._confirm_changes", lambda: True)
+
+
 def _write_definitions(directory: Path, name: str = "indexes.json") -> Path:
     path = directory / name
     path.write_text(
@@ -486,12 +492,18 @@ def test_index_prompts_to_delete_extra_indexes(
 
     assert result.exit_code == 0, result.output
     assert any("not present in the definitions" in message for message in handler.messages)
-    assert "Delete the 1 index(es)" in result.output
+    assert "Index change preview" in result.output
+    assert re.search(
+        r"^\| exampleDB\.example \|\s+0 \|\s+1 \|\s+1 \|$",
+        result.output,
+        re.MULTILINE,
+    )
+    assert "Delete the 1 index(es)" not in result.output
     assert mongo_client.commands == [{"dropIndexes": "example", "index": "extra_1"}]
     assert "Index deletion complete: 1 index(es) deleted." in result.output
 
 
-def test_index_skips_extra_index_deletion_when_declined(
+def test_index_aborts_when_preview_declined(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _write_definitions(tmp_path)
@@ -504,27 +516,23 @@ def test_index_skips_extra_index_deletion_when_declined(
     ]
     mongo_client = FakeMongoClient({"exampleDB": ["example"]}, {("exampleDB", "example"): existing})
     monkeypatch.setattr("atlas_ops.cli.create_client", lambda uri: mongo_client)
-    handler = _CaptureHandler()
-    package_logger = logging.getLogger("atlas_ops")
-    package_logger.addHandler(handler)
-    try:
-        result = runner.invoke(
-            app,
-            [
-                "index",
-                str(tmp_path),
-                "--project-id",
-                GROUP_A.id,
-                "--cluster",
-                "cluster0",
-            ],
-            input="n\n",
-        )
-    finally:
-        package_logger.removeHandler(handler)
+    monkeypatch.setattr("atlas_ops.cli._confirm_changes", lambda: False)
 
-    assert result.exit_code == 0, result.output
-    assert any("Skipping deletion of undefined indexes." in message for message in handler.messages)
+    result = runner.invoke(
+        app,
+        [
+            "index",
+            str(tmp_path),
+            "--project-id",
+            GROUP_A.id,
+            "--cluster",
+            "cluster0",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "Index change preview" in result.output
+    assert "Aborted." in result.output
     assert mongo_client.commands == []
     assert "Index deletion complete" not in result.output
 
@@ -1689,10 +1697,11 @@ def test_search_syncs_definitions_and_deletes_extras(
             "-c",
             "cluster0",
         ],
-        input="y\n",
     )
 
     assert result.exit_code == 0, result.output
+    assert "Search change preview" in result.output
+    assert "Delete the 1 search index(es)" not in result.output
     assert [call["body"].name for call in client.search_create_calls] == ["new"]
     created = client.search_create_calls[0]["body"].model_dump(by_alias=True, exclude_none=True)
     assert created == {
@@ -1725,3 +1734,46 @@ def test_search_syncs_definitions_and_deletes_extras(
     )
     assert "Search sync complete: 1 created, 1 updated, 1 skipped, 1 deleted." in result.output
     assert client.created_user_payload is None
+
+
+def test_search_aborts_when_preview_declined(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "search.json").write_text(
+        json.dumps(
+            {
+                "database": "exampleDB",
+                "collection": "example",
+                "indexes": [
+                    {
+                        "name": "new",
+                        "type": "search",
+                        "definition": {"mappings": {"dynamic": True}},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail())
+    _patch_client(monkeypatch, client)
+    monkeypatch.setattr("atlas_ops.cli._confirm_changes", lambda: False)
+
+    result = runner.invoke(
+        app,
+        [
+            "search",
+            str(tmp_path),
+            "-g",
+            GROUP_A.id,
+            "-c",
+            "cluster0",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "Search change preview" in result.output
+    assert "Aborted." in result.output
+    assert client.search_create_calls == []
+    assert client.search_update_calls == []
+    assert client.search_delete_calls == []

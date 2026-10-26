@@ -59,10 +59,11 @@ ID or name within the specified project, and select one of its connection string
 
 The default mode creates missing indexes for the collections in the definitions,
 finds existing indexes in those collections that are not present in the definitions,
-lists them, and asks whether to delete them. Confirmed deletions run after index
-creation. With `--export/-e`, `DIRECTORY` becomes an output directory: definitions
-are not read, no index is created or deleted, and the index definitions of every
-collection in all non-system databases are exported as JSON files.
+and then prints a change preview table. It asks once whether to proceed; confirmed
+deletions run after index creation, with no separate deletion prompt. With
+`--export/-e`, `DIRECTORY` becomes an output directory: definitions are not read, no
+index is created or deleted, and the index definitions of every collection in all
+non-system databases are exported as JSON files.
 
 ```bash
 # Project ID + cluster name
@@ -169,20 +170,34 @@ Execution flow:
    - `options` differ → log a WARNING (with the existing name and both option sets)
      and skip
 10. Find existing indexes in the defined collections that are not present in the
-    definitions (again by `keys`; `_id_` is always excluded), list them, and ask
-    whether to delete them (default: no)
-11. Run `createIndexes` for indexes that need creating, grouped by
+    definitions (again by `keys`; `_id_` is always excluded) and include them as
+    planned deletions
+11. Print a preview table of planned Created / Skipped / Deleted counts and ask
+    `Proceed with these changes?` (default: no); declining aborts before any change
+12. Run `createIndexes` for indexes that need creating, grouped by
     `(database, collection, commitQuorum)` with one command per group; the index name
     comes from `options.name`, or is generated using MongoDB rules (for example
     `a_1_b_-1`); `commitQuorum` is set at the command level
-12. If deletion was confirmed, run `dropIndexes` for each extra index after index
-    creation finishes
-13. Temporary user only: delete it through the Atlas API on normal exit, error, or
+13. Run `dropIndexes` for each extra index after index creation finishes; no separate
+    deletion confirmation is asked
+14. Temporary user only: delete it through the Atlas API on normal exit, error, or
     abort (send DELETE without waiting for MongoDB-side activation; deletion failures
     only log a WARNING)
-14. Print the cluster, project, connection string, and a per-collection text table of
-    Created / Skipped / Deleted; Skipped includes identical indexes and indexes
-    skipped because their options conflict
+15. Print the cluster, project, connection string, and a per-collection Markdown
+    table of Created / Skipped / Deleted; Skipped includes identical indexes and
+    indexes skipped because their options conflict
+
+Before changes are applied, the preview looks like this:
+
+Index change preview (2 collection(s) from /path/to/definitions):
+
+| Collection    | Created | Skipped | Deleted |
+| ------------- | ------: | ------: | ------: |
+| exampleDB.one |       1 |       1 |       0 |
+| exampleDB.two |       0 |       1 |       1 |
+| **Total**     |   **1** |   **2** |   **1** |
+
+Proceed with these changes? [y/N]:
 
 The default mode ends with output like this:
 
@@ -196,9 +211,9 @@ Index summary (2 collection(s) from /path/to/definitions):
 
 Skipped = identical or options-conflict indexes.
 
-With `--export`, steps 1 (read definitions) and 8–14 (apply/delete indexes) are
-skipped. After connecting to MongoDB, the tool enters export mode, cleans up the
-temporary user, and prints the export summary.
+With `--export`, steps 1 (read definitions) and 8–14 (preview and apply/delete
+indexes) are skipped. After connecting to MongoDB, the tool enters export mode,
+cleans up the temporary user, and prints the export summary.
 
 #### Export mode
 
@@ -260,8 +275,7 @@ The default mode compares each local definition with the remote cluster:
 - missing index → create
 - changed `definition` or `type` → update
 - identical → skip
-- remote index in a defined collection but absent locally → ask whether to delete
-  (default: no)
+- remote index in a defined collection but absent locally → planned deletion
 
 The command uses the Atlas Admin API cluster-wide Search index endpoint, so it does
 not connect to MongoDB or create a temporary database user.
@@ -315,12 +329,28 @@ Sync behavior:
 
 - Fetches all remote indexes for the cluster and compares them by
   `(database, collection, name)`
-- Creates or updates indexes through the Atlas SDK
 - Detects remote indexes in collections that have local definitions but are not
-  present locally, lists them, and asks once whether to delete them
-- Deletes confirmed extras after creates/updates
+  present locally and includes them as planned deletions
+- Prints a change preview table and asks `Proceed with these changes?` (default: no);
+  declining aborts before any create, update, or delete
+- After approval, creates or updates declared indexes through the Atlas SDK and
+  deletes planned extras; no separate deletion confirmation is asked
 - Leaves remote indexes in collections without local definition files untouched
-- The run ends with a per-collection Markdown table:
+- The preview and the final result use the same table under `Search change preview`
+  and `Search sync summary` headings, respectively:
+
+  ```text
+  Search change preview (1 collection(s) from /path/to/search-indexes):
+
+  | Collection        | Created | Updated | Skipped | Deleted |
+  | ----------------- | ------: | ------: | ------: | ------: |
+  | exampleDB.example |       1 |       1 |       1 |       1 |
+  | **Total**         |   **1** |   **1** |   **1** |   **1** |
+
+  Proceed with these changes? [y/N]:
+  ```
+
+- The final summary is:
 
   ```text
   Search sync summary (1 collection(s) from /path/to/search-indexes):
