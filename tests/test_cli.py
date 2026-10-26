@@ -18,16 +18,15 @@ from typer.testing import CliRunner
 
 from atlas_ops import __version__
 from atlas_ops.atlas import ClusterTarget
-from atlas_ops.cli import (
-    _change_warning,
-    _format_export_table,
-    _format_index_table,
-    _format_search_sync_table,
+from atlas_ops.cli import app
+from atlas_ops.commands.index import _format_index_table
+from atlas_ops.commands.search import _format_search_sync_table
+from atlas_ops.commands.trigger import (
     _format_trigger_plan_table,
     _trigger_plan_rows,
-    app,
 )
 from atlas_ops.trigger.sync import TriggerAction, TriggerPlan, TriggerPlanItem
+from atlas_ops.ui import _change_warning, _format_export_table
 
 runner = CliRunner()
 
@@ -188,14 +187,30 @@ def mongo(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         uris.append(uri)
         return client
 
-    monkeypatch.setattr("atlas_ops.cli.create_client", factory)
+    monkeypatch.setattr("atlas_ops.commands.index.create_client", factory)
     return SimpleNamespace(client=client, uris=uris)
+
+
+def _patch_client_factory(monkeypatch: pytest.MonkeyPatch, factory: Any) -> None:
+    for module in ("index", "search", "trigger"):
+        monkeypatch.setattr(
+            f"atlas_ops.commands.{module}.client_from_env",
+            factory,
+        )
+
+
+def _set_confirm(monkeypatch: pytest.MonkeyPatch, value: bool) -> None:
+    for module in ("index", "search", "trigger"):
+        monkeypatch.setattr(
+            f"atlas_ops.commands.{module}._confirm_changes",
+            lambda: value,
+        )
 
 
 @pytest.fixture(autouse=True)
 def confirm_changes(monkeypatch: pytest.MonkeyPatch) -> None:
     """Approve the change preview unless a test overrides it."""
-    monkeypatch.setattr("atlas_ops.cli._confirm_changes", lambda: True)
+    _set_confirm(monkeypatch, True)
 
 
 def _write_definitions(directory: Path, name: str = "indexes.json") -> Path:
@@ -214,7 +229,7 @@ def _write_definitions(directory: Path, name: str = "indexes.json") -> Path:
 
 
 def _patch_client(monkeypatch: pytest.MonkeyPatch, client: FakeAtlasClient) -> None:
-    monkeypatch.setattr("atlas_ops.cli.client_from_env", lambda: client)
+    _patch_client_factory(monkeypatch, lambda: client)
 
 
 def _clear_target_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -480,7 +495,7 @@ def test_index_prompts_to_delete_extra_indexes(
         {"v": 2, "key": {"extra": 1}, "name": "extra_1"},
     ]
     mongo_client = FakeMongoClient({"exampleDB": ["example"]}, {("exampleDB", "example"): existing})
-    monkeypatch.setattr("atlas_ops.cli.create_client", lambda uri: mongo_client)
+    monkeypatch.setattr("atlas_ops.commands.index.create_client", lambda uri: mongo_client)
     handler = _CaptureHandler()
     package_logger = logging.getLogger("atlas_ops")
     package_logger.addHandler(handler)
@@ -525,8 +540,8 @@ def test_index_aborts_when_preview_declined(
         {"v": 2, "key": {"extra": 1}, "name": "extra_1"},
     ]
     mongo_client = FakeMongoClient({"exampleDB": ["example"]}, {("exampleDB", "example"): existing})
-    monkeypatch.setattr("atlas_ops.cli.create_client", lambda uri: mongo_client)
-    monkeypatch.setattr("atlas_ops.cli._confirm_changes", lambda: False)
+    monkeypatch.setattr("atlas_ops.commands.index.create_client", lambda uri: mongo_client)
+    _set_confirm(monkeypatch, False)
 
     result = runner.invoke(
         app,
@@ -558,7 +573,7 @@ def test_index_creates_before_dropping_extra_indexes(
         {"v": 2, "key": {"extra": 1}, "name": "extra_1"},
     ]
     mongo_client = FakeMongoClient({"exampleDB": ["example"]}, {("exampleDB", "example"): existing})
-    monkeypatch.setattr("atlas_ops.cli.create_client", lambda uri: mongo_client)
+    monkeypatch.setattr("atlas_ops.commands.index.create_client", lambda uri: mongo_client)
 
     result = runner.invoke(
         app,
@@ -624,7 +639,7 @@ def test_index_summary_table_counts_per_collection(
             ],
         },
     )
-    monkeypatch.setattr("atlas_ops.cli.create_client", lambda uri: mongo_client)
+    monkeypatch.setattr("atlas_ops.commands.index.create_client", lambda uri: mongo_client)
 
     result = runner.invoke(
         app,
@@ -671,7 +686,7 @@ def test_index_export_writes_files_without_mutating_indexes(
     mongo_client = FakeMongoClient(
         {"exampleDB": ["example"]}, {("exampleDB", "example"): index_docs}
     )
-    monkeypatch.setattr("atlas_ops.cli.create_client", lambda uri: mongo_client)
+    monkeypatch.setattr("atlas_ops.commands.index.create_client", lambda uri: mongo_client)
 
     result = runner.invoke(
         app,
@@ -718,7 +733,7 @@ def test_index_prompts_when_collection_missing(
     client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail(standard="mongodb://only"))
     _patch_client(monkeypatch, client)
     missing_client = FakeMongoClient({"exampleDB": []})
-    monkeypatch.setattr("atlas_ops.cli.create_client", lambda uri: missing_client)
+    monkeypatch.setattr("atlas_ops.commands.index.create_client", lambda uri: missing_client)
 
     result = runner.invoke(
         app,
@@ -739,7 +754,7 @@ def test_index_prompts_when_database_missing(
     client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail(standard="mongodb://only"))
     _patch_client(monkeypatch, client)
     missing_client = FakeMongoClient({})
-    monkeypatch.setattr("atlas_ops.cli.create_client", lambda uri: missing_client)
+    monkeypatch.setattr("atlas_ops.commands.index.create_client", lambda uri: missing_client)
 
     result = runner.invoke(
         app,
@@ -759,7 +774,7 @@ def test_index_aborts_when_missing_namespace_declined(
     client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail(standard="mongodb://only"))
     _patch_client(monkeypatch, client)
     missing_client = FakeMongoClient({"exampleDB": []})
-    monkeypatch.setattr("atlas_ops.cli.create_client", lambda uri: missing_client)
+    monkeypatch.setattr("atlas_ops.commands.index.create_client", lambda uri: missing_client)
 
     result = runner.invoke(
         app,
@@ -801,7 +816,7 @@ def test_index_reports_mongo_errors(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     def factory(uri: str) -> FakeMongoClient:
         raise PyMongoError("boom")
 
-    monkeypatch.setattr("atlas_ops.cli.create_client", factory)
+    monkeypatch.setattr("atlas_ops.commands.index.create_client", factory)
 
     result = runner.invoke(
         app, ["index", str(tmp_path), "--project-id", GROUP_A.id, "--cluster", "cluster0"]
@@ -844,7 +859,7 @@ def test_index_skips_identical_existing_index(
     _patch_client(monkeypatch, client)
     existing = [{"v": 2, "key": {"field": 1}, "name": "field_index"}]
     mongo_client = FakeMongoClient({"exampleDB": ["example"]}, {("exampleDB", "example"): existing})
-    monkeypatch.setattr("atlas_ops.cli.create_client", lambda uri: mongo_client)
+    monkeypatch.setattr("atlas_ops.commands.index.create_client", lambda uri: mongo_client)
     handler = _CaptureHandler()
     package_logger = logging.getLogger("atlas_ops")
     package_logger.addHandler(handler)
@@ -879,7 +894,7 @@ def test_index_warns_about_existing_index_with_different_options(
         }
     ]
     mongo_client = FakeMongoClient({"exampleDB": ["example"]}, {("exampleDB", "example"): existing})
-    monkeypatch.setattr("atlas_ops.cli.create_client", lambda uri: mongo_client)
+    monkeypatch.setattr("atlas_ops.commands.index.create_client", lambda uri: mongo_client)
     handler = _CaptureHandler()
     package_logger = logging.getLogger("atlas_ops")
     package_logger.addHandler(handler)
@@ -1103,8 +1118,8 @@ def test_index_validates_definitions_before_calling_atlas(
         encoding="utf-8",
     )
     called: list[bool] = []
-    monkeypatch.setattr(
-        "atlas_ops.cli.client_from_env",
+    _patch_client_factory(
+        monkeypatch,
         lambda: called.append(True) or pytest.fail("Atlas client must not be created"),
     )
 
@@ -1117,8 +1132,8 @@ def test_index_validates_definitions_before_calling_atlas(
 
 def test_index_reports_empty_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     called: list[bool] = []
-    monkeypatch.setattr(
-        "atlas_ops.cli.client_from_env",
+    _patch_client_factory(
+        monkeypatch,
         lambda: called.append(True) or pytest.fail("Atlas client must not be created"),
     )
 
@@ -1380,8 +1395,8 @@ def test_search_exports_search_indexes(tmp_path: Path, monkeypatch: pytest.Monke
 
 def test_search_sync_requires_definitions(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     called: list[bool] = []
-    monkeypatch.setattr(
-        "atlas_ops.cli.client_from_env",
+    _patch_client_factory(
+        monkeypatch,
         lambda: called.append(True) or pytest.fail("Atlas client must not be created"),
     )
 
@@ -1577,7 +1592,9 @@ def test_trigger_exports_definitions(tmp_path: Path, monkeypatch: pytest.MonkeyP
             }
         },
     )
-    monkeypatch.setattr("atlas_ops.cli.app_services_client_from_env", lambda: app_client)
+    monkeypatch.setattr(
+        "atlas_ops.commands.trigger.app_services_client_from_env", lambda: app_client
+    )
 
     result = runner.invoke(
         app,
@@ -1629,8 +1646,8 @@ def test_trigger_exports_definitions(tmp_path: Path, monkeypatch: pytest.MonkeyP
 
 def test_trigger_sync_requires_definitions(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     called: list[bool] = []
-    monkeypatch.setattr(
-        "atlas_ops.cli.client_from_env",
+    _patch_client_factory(
+        monkeypatch,
         lambda: called.append(True) or pytest.fail("Atlas client must not be created"),
     )
 
@@ -1660,7 +1677,9 @@ def test_trigger_uses_environment_targets(tmp_path: Path, monkeypatch: pytest.Mo
     client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail())
     _patch_client(monkeypatch, client)
     app_client = FakeAppServicesClient({None: [], "atlas": []}, {}, {})
-    monkeypatch.setattr("atlas_ops.cli.app_services_client_from_env", lambda: app_client)
+    monkeypatch.setattr(
+        "atlas_ops.commands.trigger.app_services_client_from_env", lambda: app_client
+    )
     monkeypatch.setenv("ATLAS_PROJECT_ID", GROUP_A.id)
     monkeypatch.setenv("ATLAS_CLUSTER_NAME", "cluster0")
 
@@ -1801,7 +1820,7 @@ def test_search_aborts_when_preview_declined(
     )
     client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail())
     _patch_client(monkeypatch, client)
-    monkeypatch.setattr("atlas_ops.cli._confirm_changes", lambda: False)
+    _set_confirm(monkeypatch, False)
 
     result = runner.invoke(
         app,
@@ -1890,7 +1909,9 @@ def test_trigger_sync_creates_function_then_trigger(
         },
         {"app-triggers": []},
     )
-    monkeypatch.setattr("atlas_ops.cli.app_services_client_from_env", lambda: app_client)
+    monkeypatch.setattr(
+        "atlas_ops.commands.trigger.app_services_client_from_env", lambda: app_client
+    )
 
     result = runner.invoke(
         app,
@@ -1955,8 +1976,10 @@ def test_trigger_sync_aborts_when_preview_declined(
         {"app-triggers": [{"_id": "svc-1", "name": "cluster0", "type": "mongodb-atlas"}]},
         {"app-triggers": []},
     )
-    monkeypatch.setattr("atlas_ops.cli.app_services_client_from_env", lambda: app_client)
-    monkeypatch.setattr("atlas_ops.cli._confirm_changes", lambda: False)
+    monkeypatch.setattr(
+        "atlas_ops.commands.trigger.app_services_client_from_env", lambda: app_client
+    )
+    _set_confirm(monkeypatch, False)
 
     result = runner.invoke(
         app,

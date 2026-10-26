@@ -647,7 +647,12 @@ source .venv/bin/activate
 │   └── atlas_ops/
 │       ├── __init__.py               # version
 │       ├── __main__.py               # python -m atlas_ops entry point
-│       ├── cli.py                    # Typer app and command definitions
+│       ├── cli.py                    # Typer app, version, command registration
+│       ├── commands/
+│       │   ├── __init__.py
+│       │   ├── index.py              # index command and its helpers
+│       │   ├── search.py             # search command and its helpers
+│       │   └── trigger.py            # trigger command and its helpers
 │       ├── atlas.py                  # credentials, cluster lookup, connection strings
 │       ├── env.py                    # .env loading (search upward, do not override)
 │       ├── filenames.py              # safe JSON export filenames
@@ -661,12 +666,18 @@ source .venv/bin/activate
 │       │   └── plan.py               # index/option comparison and extra-index detection
 │       ├── search/
 │       │   ├── __init__.py
-│       │   └── export.py             # export Atlas Search index definitions
+│       │   ├── apply.py              # create/update/delete search indexes
+│       │   ├── definitions.py        # load local search definition files
+│       │   ├── export.py             # export Atlas Search index definitions
+│       │   ├── plan.py               # compare local and remote search indexes
+│       │   └── remote.py             # fetch cluster-wide search indexes
 │       ├── trigger/
 │       │   ├── __init__.py
 │       │   ├── definitions.py        # load local trigger definition files
 │       │   ├── export.py             # export App Services trigger definitions
 │       │   └── sync.py               # create/update/delete triggers and functions
+│       ├── references.py             # project/cluster option and env resolution
+│       ├── ui.py                     # prompts, warnings, confirmation, Markdown tables
 │       ├── log.py                    # logging config (RichHandler, stderr)
 │       ├── utils.py                  # terminal yellow/green/red helpers
 │       └── errors.py                 # user-facing error types
