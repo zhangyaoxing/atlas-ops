@@ -5,8 +5,10 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
 from pyatlassdk.app.models.trigger import Trigger
 
+from atlas_ops.errors import TriggerExportError
 from atlas_ops.trigger.export import (
     TriggerCollection,
     TriggerExportResult,
@@ -222,15 +224,16 @@ def test_export_filters_by_cluster_and_groups_by_collection(
     )
 
     assert result == TriggerExportResult(
-        files=3,
-        triggers=3,
+        files=4,
+        triggers=4,
         apps=2,
         collections=(
             TriggerCollection(database="db", collection="coll", triggers=2),
             TriggerCollection(database="other_db", collection="other_coll", triggers=1),
         ),
+        scheduled=1,
     )
-    insert = json.loads((tmp_path / "db.coll.on-insert.json").read_text(encoding="utf-8"))
+    insert = json.loads((tmp_path / "on-insert.json").read_text(encoding="utf-8"))
     assert insert["database"] == "db"
     assert insert["collection"] == "coll"
     assert "appId" not in insert
@@ -248,7 +251,7 @@ def test_export_filters_by_cluster_and_groups_by_collection(
         "source": "exports = function() { return 2; };",
     }
 
-    update = json.loads((tmp_path / "db.coll.on-update.json").read_text(encoding="utf-8"))
+    update = json.loads((tmp_path / "on-update.json").read_text(encoding="utf-8"))
     assert update["trigger"]["name"] == "on-update"
     assert update["trigger"]["disabled"] is True
     assert update["function"] == {
@@ -256,11 +259,16 @@ def test_export_filters_by_cluster_and_groups_by_collection(
         "source": "exports = function() { return 1; };",
     }
 
-    other = json.loads(
-        (tmp_path / "other_db.other_coll.other-trigger.json").read_text(encoding="utf-8")
-    )
+    other = json.loads((tmp_path / "other-trigger.json").read_text(encoding="utf-8"))
     assert other["trigger"]["name"] == "other-trigger"
     assert other["function"] is None
+
+    scheduled = json.loads((tmp_path / "nightly.json").read_text(encoding="utf-8"))
+    assert "database" not in scheduled
+    assert "collection" not in scheduled
+    assert scheduled["trigger"]["name"] == "nightly"
+    assert scheduled["trigger"]["type"] == "SCHEDULED"
+    assert scheduled["function"] is None
 
     assert client.apps.calls == [
         ("project-1", None),
@@ -312,7 +320,8 @@ def test_export_skips_apps_without_matching_data_source(tmp_path: Path) -> None:
 
     assert result == TriggerExportResult(files=0, triggers=0, apps=0, collections=())
     assert list(tmp_path.iterdir()) == []
-    assert client.triggers.calls == []
+    assert client.triggers.calls == [("app-1", "project-1")]
+    assert client.functions.list_calls == [("app-1", "project-1")]
 
 
 def test_export_sanitizes_namespace_filename(tmp_path: Path) -> None:
@@ -345,7 +354,7 @@ def test_export_sanitizes_namespace_filename(tmp_path: Path) -> None:
 
     export_triggers(client, "project-1", "cluster0", "cluster-id", tmp_path)
 
-    assert (tmp_path / "db.a_b.on-insert.json").exists()
+    assert (tmp_path / "on-insert.json").exists()
 
 
 def test_export_matches_service_by_cluster_id(tmp_path: Path) -> None:
@@ -385,12 +394,10 @@ def test_export_matches_service_by_cluster_id(tmp_path: Path) -> None:
     )
 
     assert result.triggers == 1
-    assert (tmp_path / "db.coll.on-insert.json").exists()
+    assert (tmp_path / "on-insert.json").exists()
 
 
-def test_export_disambiguates_duplicate_trigger_names_with_app(
-    tmp_path: Path,
-) -> None:
+def test_export_rejects_duplicate_trigger_names(tmp_path: Path) -> None:
     client = FakeClient(
         {
             None: [
@@ -430,10 +437,55 @@ def test_export_disambiguates_duplicate_trigger_names_with_app(
         },
     )
 
+    with pytest.raises(TriggerExportError, match="Duplicate trigger name"):
+        export_triggers(client, "project-1", "cluster0", "", tmp_path)
+
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_export_includes_scheduled_triggers(tmp_path: Path) -> None:
+    client = FakeClient(
+        {None: [SimpleNamespace(id="app-1", name="Triggers")]},
+        {"app-1": []},
+        {
+            "app-1": [
+                {
+                    "_id": "trigger-1",
+                    "name": "nightly",
+                    "type": "SCHEDULED",
+                    "function_id": "fn-1",
+                    "config": {"schedule": "0 0 * * *"},
+                }
+            ]
+        },
+        functions_by_app={"app-1": [{"_id": "fn-1", "name": "nightly-function"}]},
+        function_definitions={
+            "fn-1": {
+                "_id": "fn-1",
+                "name": "nightly-function",
+                "private": True,
+                "source": "exports = function() { return true; };",
+                "last_modified": 123,
+            }
+        },
+    )
+
     result = export_triggers(client, "project-1", "cluster0", "", tmp_path)
 
-    assert result.files == 2
-    assert result.triggers == 2
-    assert result.collections == (TriggerCollection(database="db", collection="coll", triggers=2),)
-    assert (tmp_path / "db.coll.on-insert.app-one.json").exists()
-    assert (tmp_path / "db.coll.on-insert.app-two.json").exists()
+    assert result == TriggerExportResult(
+        files=1,
+        triggers=1,
+        apps=1,
+        collections=(),
+        scheduled=1,
+    )
+    payload = json.loads((tmp_path / "nightly.json").read_text(encoding="utf-8"))
+    assert "database" not in payload
+    assert "collection" not in payload
+    assert payload["trigger"]["name"] == "nightly"
+    assert payload["trigger"]["type"] == "SCHEDULED"
+    assert payload["trigger"]["config"] == {"schedule": "0 0 * * *"}
+    assert payload["function"] == {
+        "private": True,
+        "source": "exports = function() { return true; };",
+    }

@@ -1554,7 +1554,7 @@ def test_trigger_exports_definitions(tmp_path: Path, monkeypatch: pytest.MonkeyP
     )
 
     assert result.exit_code == 0, result.output
-    payload = json.loads((tmp_path / "db.coll.on-insert.json").read_text(encoding="utf-8"))
+    payload = json.loads((tmp_path / "on-insert.json").read_text(encoding="utf-8"))
     assert payload == {
         "database": "db",
         "collection": "coll",
@@ -1578,16 +1578,14 @@ def test_trigger_exports_definitions(tmp_path: Path, monkeypatch: pytest.MonkeyP
     assert app_client.function_get_calls == [("app-1", "fn-1", GROUP_A.id)]
     assert client.created_user_payload is None
     assert "Trigger export summary (1 file(s)" in result.output
-    assert "| Collection | Triggers |" in result.output
+    assert re.search(r"^\| Scope\s+\| Triggers \|$", result.output, re.MULTILINE)
     assert re.search(r"^\| db\.coll\s+\|\s+1 \|$", result.output, re.MULTILINE)
     assert re.search(
         r"^\| \*\*Total\*\*\s+\|\s+\*\*1\*\* \|$",
         result.output,
         re.MULTILINE,
     )
-    assert (
-        "Exported 1 trigger(s) in 1 file(s) from 1 collection(s) across 1 app(s)" in result.output
-    )
+    assert "Exported 1 trigger(s) in 1 file(s) across 1 app(s)" in result.output
 
 
 def test_trigger_requires_export(tmp_path: Path) -> None:
@@ -1625,9 +1623,7 @@ def test_trigger_uses_environment_targets(tmp_path: Path, monkeypatch: pytest.Mo
     assert result.exit_code == 0, result.output
     assert client.get_group_calls == [GROUP_A.id]
     assert app_client.app_calls == [(GROUP_A.id, None), (GROUP_A.id, "atlas")]
-    assert (
-        "Exported 0 trigger(s) in 0 file(s) from 0 collection(s) across 0 app(s)" in result.output
-    )
+    assert "Exported 0 trigger(s) in 0 file(s) across 0 app(s)" in result.output
 
 
 def test_search_syncs_definitions_and_deletes_extras(

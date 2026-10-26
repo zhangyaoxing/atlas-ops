@@ -401,10 +401,11 @@ the command never opens a MongoDB connection.
 
 ### `trigger`
 
-Export App Services trigger definitions related to one Atlas cluster. The command
-uses the SDK's App Services Admin client (`AtlasAppAdminClient`), so it needs Atlas
-API credentials, a project ID, and a cluster; it does not connect to MongoDB or
-create a temporary database user. Only export mode is implemented so far.
+Export App Services database triggers related to one Atlas cluster, plus all
+scheduled triggers. The command uses the SDK's App Services Admin client
+(`AtlasAppAdminClient`), so it needs Atlas API credentials, a project ID, and a
+cluster; it does not connect to MongoDB or create a temporary database user. Only
+export mode is implemented so far.
 
 ```bash
 mkdir -p ./exported-triggers
@@ -428,37 +429,36 @@ Behavior:
 
 - Logs in to the App Services Admin API with the Atlas API key pair
 - Scans both standard apps and the special `atlas` product app
-- Inspects each app's MongoDB data sources and keeps only those linked to the target
-  cluster (matched by cluster name or ID)
-- Keeps only `DATABASE` triggers on those data sources that specify both a database
+- Inspects each app's MongoDB data sources and keeps `DATABASE` triggers linked to
+  the target cluster (matched by cluster name or ID) that specify both a database
   and a collection
+- Also includes all `SCHEDULED` triggers; they have no database/collection
 - Resolves each trigger's associated function from `function_id`, `function_name`, or
   `event_processors.FUNCTION`, then fetches the full function definition
-- Writes one file per trigger: `<database>.<collection>.<trigger>.json`
+- Writes one file per trigger, named only after the trigger: `<trigger>.json`
 - Adds a `function` subdocument next to `trigger`
 - Removes server-managed `_id` and `last_modified` values
 - Also removes environment-specific values so the files can be synced to another
   project: `appId`, `appName`, trigger `function_id` / `function_name`,
   `event_processors`, `config.service_id`, `config.clusterName`, and function
   `name` / `run_as_user_id`
-- The trigger `name` is the stable key used by a future name-keyed sync
-- If two apps expose the same trigger name for the same namespace, the app name is
-  appended to the filename to avoid overwriting
-- Collections without matching triggers produce no file
+- The trigger `name` is the stable key used by a future name-keyed sync, so names
+  must be unique across exported apps; a duplicate name is an error
 - Unsafe filename characters are replaced with `_`
-- The run ends with a per-collection Markdown table and total count:
+- The run ends with a per-scope Markdown table and total count:
 
   ```text
-  Trigger export summary (3 file(s) from /path/to/exported-triggers):
+  Trigger export summary (4 file(s) from /path/to/exported-triggers):
 
-  | Collection        | Triggers |
+  | Scope             | Triggers |
   | ----------------- | -------: |
   | exampleDB.example |        2 |
   | exampleDB.other   |        1 |
-  | **Total**         |    **3** |
+  | scheduled         |        1 |
+  | **Total**         |    **4** |
   ```
 
-Trigger file format (`exampleDB.example.on-insert.json`):
+Database trigger file format (`on-insert.json`):
 
 ```json
 {
@@ -481,15 +481,33 @@ Trigger file format (`exampleDB.example.on-insert.json`):
 }
 ```
 
+A scheduled trigger file (`nightly.json`) has no top-level database/collection:
+
+```json
+{
+  "trigger": {
+    "name": "nightly",
+    "type": "SCHEDULED",
+    "config": {
+      "schedule": "0 0 * * *"
+    }
+  },
+  "function": {
+    "private": true,
+    "source": "exports = function() { ... };"
+  }
+}
+```
+
 `function` is `null` if the trigger has no resolvable function. The function source
 code is included so the trigger can be recreated together with its function. A
 future sync can match triggers by `trigger.name`, resolve the target trigger's own
 function reference, and update that function with the exported definition.
 
-The final summary line also reports file, collection, and app counts:
+The final summary line reports file and app counts:
 
 ```text
-Exported 3 trigger(s) in 3 file(s) from 2 collection(s) across 1 app(s) to /path/to/exported-triggers.
+Exported 4 trigger(s) in 4 file(s) across 1 app(s) to /path/to/exported-triggers.
 ```
 
 The Atlas API key needs App Services admin access for the project, for example

@@ -23,5 +23,9 @@ class SearchDefinitionError(OpsError):
     """Raised when one or more search index definition files are invalid."""
 
 
+class TriggerExportError(OpsError):
+    """Raised when trigger definitions cannot be written unambiguously."""
+
+
 class AtlasOperationError(OpsError):
     """Raised when the Atlas API cannot complete an operation."""

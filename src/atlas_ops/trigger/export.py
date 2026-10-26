@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
+from atlas_ops.errors import TriggerExportError
 from atlas_ops.filenames import json_filename
 
 
@@ -30,12 +31,13 @@ class TriggerCollection:
 
 @dataclass(frozen=True, slots=True)
 class TriggerExportResult:
-    """Trigger files, apps, and collection counts written during an export."""
+    """Trigger files, apps, collection counts, and scheduled count."""
 
     files: int
     triggers: int
     apps: int
     collections: tuple[TriggerCollection, ...]
+    scheduled: int = 0
 
 
 def export_triggers(
@@ -48,10 +50,10 @@ def export_triggers(
     """Export database triggers related to *cluster_name* as one file each.
 
     Each App Services app is inspected for data sources linked to the target
-    cluster. Only ``DATABASE`` triggers on those data sources that name both a
-    database and a collection are exported. Every trigger is written to
-    ``<database>.<collection>.<trigger>.json`` together with its associated
-    function. Server-managed ``_id`` values are removed.
+    cluster. Database triggers on those data sources must name both a database
+    and a collection; scheduled triggers are always included. Every trigger is
+    written to ``<trigger>.json`` together with its associated function.
+    Server-managed ``_id`` values are removed.
     """
     directory.mkdir(parents=True, exist_ok=True)
 
@@ -73,9 +75,6 @@ def export_triggers(
             cluster_name,
             cluster_id,
         )
-        if not service_ids:
-            continue
-
         functions_by_name = {
             name: function_id
             for function in _results(
@@ -98,23 +97,32 @@ def export_triggers(
             definition = _trigger_definition(trigger)
             if definition is None:
                 continue
-            if str(definition.get("type") or "").upper() != "DATABASE":
+            trigger_type = str(definition.get("type") or "").upper()
+            if trigger_type not in {"DATABASE", "SCHEDULED"}:
                 continue
-            config = definition.get("config")
-            if not isinstance(config, dict):
-                continue
-            service_id = config.get("service_id")
-            if not isinstance(service_id, str) or service_id not in service_ids:
-                continue
-            database = config.get("database")
-            collection = config.get("collection")
-            if (
-                not isinstance(database, str)
-                or not database
-                or not isinstance(collection, str)
-                or not collection
-            ):
-                continue
+
+            database: str | None = None
+            collection: str | None = None
+            if trigger_type == "DATABASE":
+                if not service_ids:
+                    continue
+                config = definition.get("config")
+                if not isinstance(config, dict):
+                    continue
+                service_id = config.get("service_id")
+                if not isinstance(service_id, str) or service_id not in service_ids:
+                    continue
+                raw_database = config.get("database")
+                raw_collection = config.get("collection")
+                if (
+                    not isinstance(raw_database, str)
+                    or not raw_database
+                    or not isinstance(raw_collection, str)
+                    or not raw_collection
+                ):
+                    continue
+                database = raw_database
+                collection = raw_collection
 
             associated_function = _associated_function(
                 client,
@@ -137,7 +145,8 @@ def export_triggers(
             apps_with_triggers.add(app_id)
 
     collection_counts: dict[tuple[str, str], int] = {}
-    grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    scheduled = 0
+    grouped: dict[str, list[dict[str, Any]]] = {}
     for entry in entries:
         database = entry["database"]
         collection = entry["collection"]
@@ -145,41 +154,43 @@ def export_triggers(
         name = trigger.get("name")
         if not isinstance(name, str) or not name:
             continue
-        collection_counts[(database, collection)] = (
-            collection_counts.get((database, collection), 0) + 1
-        )
-        grouped.setdefault((database, collection, name), []).append(entry)
+        if database is not None and collection is not None:
+            collection_counts[(database, collection)] = (
+                collection_counts.get((database, collection), 0) + 1
+            )
+        else:
+            scheduled += 1
+        grouped.setdefault(name, []).append(entry)
+
+    outputs: list[tuple[str, dict[str, Any]]] = []
+    used_filenames: set[str] = set()
+    for name in sorted(grouped):
+        group = grouped[name]
+        if len(group) > 1:
+            raise TriggerExportError(f"Duplicate trigger name {name!r}; filenames must be unique.")
+        entry = group[0]
+        filename = json_filename(name)
+        if filename in used_filenames:
+            raise TriggerExportError(
+                f"Trigger name {name!r} produces a duplicate filename {filename!r}."
+            )
+        used_filenames.add(filename)
+        outputs.append((filename, entry))
 
     files = 0
-    used_filenames: set[str] = set()
-    for database, collection, name in sorted(grouped):
-        group = grouped[(database, collection, name)]
-        group.sort(key=lambda item: (str(item["appName"]), str(item["appId"])))
-        for entry in group:
-            parts = [database, collection, name]
-            if len(group) > 1:
-                parts.append(str(entry["appName"]))
-            filename = json_filename(*parts)
-            if filename in used_filenames:
-                filename = json_filename(*parts, str(entry["appId"]))
-            suffix = 2
-            while filename in used_filenames:
-                filename = json_filename(*parts, str(entry["appId"]), str(suffix))
-                suffix += 1
-            used_filenames.add(filename)
-
-            document = {
-                "database": database,
-                "collection": collection,
-                "trigger": entry["trigger"],
-                "function": entry["function"],
-            }
-            path = directory / filename
-            path.write_text(
-                json.dumps(document, indent=2, ensure_ascii=False, default=str) + "\n",
-                encoding="utf-8",
-            )
-            files += 1
+    for filename, entry in outputs:
+        document: dict[str, Any] = {}
+        if entry["database"] is not None and entry["collection"] is not None:
+            document["database"] = entry["database"]
+            document["collection"] = entry["collection"]
+        document["trigger"] = entry["trigger"]
+        document["function"] = entry["function"]
+        path = directory / filename
+        path.write_text(
+            json.dumps(document, indent=2, ensure_ascii=False, default=str) + "\n",
+            encoding="utf-8",
+        )
+        files += 1
 
     exported = [
         TriggerCollection(database=database, collection=collection, triggers=count)
@@ -190,6 +201,7 @@ def export_triggers(
         triggers=files,
         apps=len(apps_with_triggers),
         collections=tuple(exported),
+        scheduled=scheduled,
     )
 
 

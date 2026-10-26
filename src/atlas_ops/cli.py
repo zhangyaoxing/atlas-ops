@@ -523,10 +523,9 @@ def trigger(
                 directory,
             )
             logger.info(
-                "Exported %d trigger(s) in %d file(s) from %d collection(s) across %d app(s).",
+                "Exported %d trigger(s) in %d file(s) across %d app(s).",
                 result.triggers,
                 result.files,
-                len(result.collections),
                 result.apps,
             )
     except OpsError as exc:
@@ -1108,14 +1107,15 @@ def _print_trigger_export_summary(
     typer.echo("")
 
     rows = [(f"{item.database}.{item.collection}", item.triggers) for item in result.collections]
+    if result.scheduled:
+        rows.append(("scheduled", result.scheduled))
     typer.echo(f"Trigger export summary ({result.files} file(s) from {directory}):")
     typer.echo("")
-    typer.echo(_format_export_table(rows, second_header="Triggers"))
+    typer.echo(_format_export_table(rows, first_header="Scope", second_header="Triggers"))
     typer.echo("")
     typer.echo(
-        f"Exported {result.triggers} trigger(s) in {result.files} file(s) from "
-        f"{len(result.collections)} collection(s) across {result.apps} app(s) "
-        f"to {directory}."
+        f"Exported {result.triggers} trigger(s) in {result.files} file(s) "
+        f"across {result.apps} app(s) to {directory}."
     )
 
 
