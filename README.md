@@ -186,16 +186,15 @@ Execution flow:
 
 The default mode ends with output like this:
 
-```text
 Index summary (2 collection(s) from /path/to/definitions):
-Collection     Created  Skipped  Deleted
--------------  -------  -------  -------
-exampleDB.one        1        1        0
-exampleDB.two        0        1        1
--------------  -------  -------  -------
-Total                1        2        1
+
+| Collection    | Created | Skipped | Deleted |
+| ------------- | ------: | ------: | ------: |
+| exampleDB.one |       1 |       1 |       0 |
+| exampleDB.two |       0 |       1 |       1 |
+| **Total**     |   **1** |   **2** |   **1** |
+
 Skipped = identical or options-conflict indexes.
-```
 
 With `--export`, steps 1 (read definitions) and 8–14 (apply/delete indexes) are
 skipped. After connecting to MongoDB, the tool enters export mode, cleans up the

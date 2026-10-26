@@ -603,9 +603,22 @@ def test_index_summary_table_counts_per_collection(
 
     assert result.exit_code == 0, result.output
     assert "Index summary (2 collection(s)" in result.output
-    assert re.search(r"^exampleDB\.one[ \t]+1[ \t]+1[ \t]+0$", result.output, re.MULTILINE)
-    assert re.search(r"^exampleDB\.two[ \t]+0[ \t]+1[ \t]+1$", result.output, re.MULTILINE)
-    assert re.search(r"^Total[ \t]+1[ \t]+2[ \t]+1$", result.output, re.MULTILINE)
+    assert re.search(
+        r"^\| exampleDB\.one\s+\|\s+1 \|\s+1 \|\s+0 \|$",
+        result.output,
+        re.MULTILINE,
+    )
+    assert re.search(
+        r"^\| exampleDB\.two\s+\|\s+0 \|\s+1 \|\s+1 \|$",
+        result.output,
+        re.MULTILINE,
+    )
+    assert re.search(
+        r"^\| \*\*Total\*\*\s+\|\s+\*\*1\*\* "
+        r"\|\s+\*\*2\*\* \|\s+\*\*1\*\* \|$",
+        result.output,
+        re.MULTILINE,
+    )
 
 
 def test_index_export_writes_files_without_mutating_indexes(

@@ -718,7 +718,9 @@ def _print_summary(
 
     rows = _collection_summary(definitions, plan, dropped)
     typer.echo(f"Index summary ({len(rows)} collection(s) from {directory}):")
+    typer.echo("")
     typer.echo(_format_index_table(rows))
+    typer.echo("")
     typer.echo("Skipped = identical or options-conflict indexes.")
     typer.echo("")
 
@@ -773,28 +775,17 @@ def _collection_summary(
 
 def _format_index_table(rows: list[tuple[str, int, int, int]]) -> str:
     headers = ("Collection", "Created", "Skipped", "Deleted")
+    body = [
+        (_markdown_cell(database), created, skipped, deleted)
+        for database, created, skipped, deleted in rows
+    ]
     total = (
-        "Total",
-        sum(row[1] for row in rows),
-        sum(row[2] for row in rows),
-        sum(row[3] for row in rows),
+        "**Total**",
+        f"**{sum(row[1] for row in rows)}**",
+        f"**{sum(row[2] for row in rows)}**",
+        f"**{sum(row[3] for row in rows)}**",
     )
-    widths = [len(value) for value in headers]
-    for row in [*rows, total]:
-        for index, value in enumerate(row):
-            widths[index] = max(widths[index], len(str(value)))
-
-    def render(cells: tuple[object, ...]) -> str:
-        return "  ".join(
-            [str(cells[0]).ljust(widths[0])]
-            + [str(value).rjust(widths[index]) for index, value in enumerate(cells[1:], start=1)]
-        )
-
-    rule = "  ".join("-" * width for width in widths)
-    lines = [render(headers), rule]
-    lines.extend(render(row) for row in rows)
-    lines.extend([rule, render(total)])
-    return "\n".join(lines)
+    return _format_markdown_table(headers, body, total, numeric_columns={1, 2, 3})
 
 
 def _print_export_summary(
@@ -821,20 +812,41 @@ def _print_export_summary(
 
 
 def _format_export_table(rows: list[tuple[str, int]], first_header: str = "Collection") -> str:
-    header = (first_header, "Exported")
+    body = [(_markdown_cell(namespace), count) for namespace, count in rows]
     total = ("**Total**", f"**{sum(count for _, count in rows)}**")
-    body = [(_markdown_cell(namespace), str(count)) for namespace, count in rows]
-    widths = [
-        max(len(cells[0]) for cells in [header, *body, total]),
-        max(len(cells[1]) for cells in [header, *body, total]),
+    return _format_markdown_table(
+        (first_header, "Exported"),
+        body,
+        total,
+        numeric_columns={1},
+    )
+
+
+def _format_markdown_table(
+    headers: Sequence[str],
+    rows: Sequence[tuple[object, ...]],
+    total: Sequence[object],
+    *,
+    numeric_columns: set[int],
+) -> str:
+    table_rows = [headers, *rows, total]
+    widths = [max(len(str(row[index])) for row in table_rows) for index in range(len(headers))]
+
+    def render(cells: Sequence[object]) -> str:
+        rendered: list[str] = []
+        for index, value in enumerate(cells):
+            text = str(value)
+            rendered.append(
+                text.rjust(widths[index]) if index in numeric_columns else text.ljust(widths[index])
+            )
+        return f"| {' | '.join(rendered)} |"
+
+    separators = [
+        f"{'-' * (width - 1)}:" if index in numeric_columns else "-" * width
+        for index, width in enumerate(widths)
     ]
-
-    def render(cells: tuple[str, str]) -> str:
-        return f"| {cells[0].ljust(widths[0])} | {cells[1].rjust(widths[1])} |"
-
-    separator = f"| {'-' * widths[0]} | {'-' * (widths[1] - 1)}: |"
-    lines = [render(header), separator]
-    lines.extend(render(cells) for cells in body)
+    lines = [render(headers), f"| {' | '.join(separators)} |"]
+    lines.extend(render(row) for row in rows)
     lines.append(render(total))
     return "\n".join(lines)
 
