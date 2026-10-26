@@ -98,6 +98,8 @@ class ProjectTarget:
 
     project_id: str
     project_name: str
+    org_id: str = ""
+    org_name: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,6 +110,8 @@ class ClusterTarget:
     project_name: str
     cluster_id: str
     cluster_name: str
+    org_id: str = ""
+    org_name: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -173,7 +177,23 @@ def get_project(client: AtlasProjectClient, project_id: str) -> ProjectTarget:
                 f"Project {project_id!r} was not found or is not accessible."
             ) from exc
         raise
-    return ProjectTarget(project_id=project_id, project_name=group.name)
+    org_id = getattr(group, "org_id", None)
+    if not isinstance(org_id, str):
+        org_id = ""
+    org_name = ""
+    organizations = getattr(client, "organizations", None)
+    if org_id and organizations is not None:
+        try:
+            organization = organizations.get_org(org_id=org_id)
+            org_name = organization.name
+        except AtlasAdminApiError:
+            org_name = ""
+    return ProjectTarget(
+        project_id=project_id,
+        project_name=group.name,
+        org_id=org_id,
+        org_name=org_name,
+    )
 
 
 def find_clusters(
@@ -201,6 +221,8 @@ def find_clusters(
             project_name=project.project_name,
             cluster_id=cluster.id or "",
             cluster_name=cluster.name,
+            org_id=project.org_id,
+            org_name=project.org_name,
         )
         if lookup_by_id:
             if (cluster.id or "").lower() == reference.lower():

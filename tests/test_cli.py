@@ -17,7 +17,9 @@ from pymongo.errors import PyMongoError
 from typer.testing import CliRunner
 
 from atlas_ops import __version__
+from atlas_ops.atlas import ClusterTarget
 from atlas_ops.cli import (
+    _change_warning,
     _format_export_table,
     _format_index_table,
     _format_search_sync_table,
@@ -2009,3 +2011,24 @@ def test_trigger_plan_rows_sort_actions_for_plan_and_summary() -> None:
         ("old", "SCHEDULED", "delete"),
         ("same", "DATABASE", "identical"),
     ]
+
+
+def test_change_warning_colors_names_green() -> None:
+    warning = _change_warning(
+        ClusterTarget(
+            project_id="project-id",
+            project_name="Project A",
+            cluster_id="cluster-id",
+            cluster_name="cluster0",
+            org_id="org-id",
+            org_name="Org A",
+        ),
+        "search indexes",
+    )
+
+    assert "Heads up! search indexes in" in warning
+    assert "will be changed!" in warning
+    assert "\x1b[33mHeads up! search indexes in \x1b[0m" in warning
+    assert "\x1b[32mOrg A\x1b[0m" in warning
+    assert "\x1b[32mProject A\x1b[0m" in warning
+    assert "\x1b[32mcluster0\x1b[0m" in warning

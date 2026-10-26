@@ -299,9 +299,11 @@ def index(
                         )
                         if not has_changes:
                             typer.echo("No changes to apply.")
-                        elif not _confirm_changes():
-                            typer.echo("Aborted.")
-                            raise typer.Exit(code=1)
+                        else:
+                            _print_change_warning(target, "indexes")
+                            if not _confirm_changes():
+                                typer.echo("Aborted.")
+                                raise typer.Exit(code=1)
                         pending = sum(1 for item in plan.items if item.action is IndexAction.CREATE)
                         if pending:
                             logger.info("Creating %d index(es)...", pending)
@@ -429,9 +431,11 @@ def search(
                 )
                 if not has_changes:
                     typer.echo("No changes to apply.")
-                elif not _confirm_changes():
-                    typer.echo("Aborted.")
-                    raise typer.Exit(code=1)
+                else:
+                    _print_change_warning(target, "search indexes")
+                    if not _confirm_changes():
+                        typer.echo("Aborted.")
+                        raise typer.Exit(code=1)
                 sync_result = apply_search_plan(
                     client,
                     project_id,
@@ -568,9 +572,11 @@ def trigger(
                 )
                 if not has_changes:
                     typer.echo("No changes to apply.")
-                elif not _confirm_changes():
-                    typer.echo("Aborted.")
-                    raise typer.Exit(code=1)
+                else:
+                    _print_change_warning(target, "triggers")
+                    if not _confirm_changes():
+                        typer.echo("Aborted.")
+                        raise typer.Exit(code=1)
                 sync_result = apply_trigger_sync(
                     app_client,
                     triggers_app.id,
@@ -817,6 +823,31 @@ def _prompt_choice(count: int, label: str) -> int:
         if 1 <= choice <= count:
             return choice - 1
         typer.secho(f"Enter a number between 1 and {count}.", fg=typer.colors.YELLOW, err=True)
+
+
+def _change_warning(target: ClusterTarget, resource: str) -> str:
+    org = target.org_name or target.org_id or "unknown organization"
+
+    def yellow(value: str) -> str:
+        return typer.style(value, fg=typer.colors.YELLOW)
+
+    def green(value: str) -> str:
+        return typer.style(value, fg=typer.colors.GREEN)
+
+    return (
+        yellow(f"Heads up! {resource} in ")
+        + green(org)
+        + yellow(" - ")
+        + green(target.project_name)
+        + yellow(" - ")
+        + green(target.cluster_name)
+        + yellow(" will be changed!")
+    )
+
+
+def _print_change_warning(target: ClusterTarget, resource: str) -> None:
+    typer.echo(_change_warning(target, resource))
+    typer.echo("")
 
 
 def _confirm_changes() -> bool:
