@@ -34,6 +34,12 @@ from atlas_ops.trigger.sync import TriggerAction, TriggerPlan, TriggerPlanItem
 from atlas_ops.ui import _change_warning, _format_export_table
 
 runner = CliRunner()
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _strip_ansi(value: str) -> str:
+    return _ANSI.sub("", value)
+
 
 GROUP_A = SimpleNamespace(id="a" * 24, name="Project A")
 CLUSTER = SimpleNamespace(id="b" * 24, name="cluster0")
@@ -270,17 +276,18 @@ def test_no_args_shows_help() -> None:
 def test_index_help_documents_arguments() -> None:
     result = runner.invoke(app, ["index", "--help"])
     assert result.exit_code == 0
-    assert "directory" in result.stdout
-    assert "--project-id" in result.stdout
-    assert "--cluster" in result.stdout
-    assert "-g" in result.stdout
-    assert "-c" in result.stdout
-    assert "-u" in result.stdout
-    assert "-p" in result.stdout
-    assert "--export" in result.stdout
-    assert "-e" in result.stdout
-    assert "--connection-type" in result.stdout
-    assert "-t" in result.stdout
+    stdout = _strip_ansi(result.stdout)
+    assert "directory" in stdout
+    assert "--project-id" in stdout
+    assert "--cluster" in stdout
+    assert "-g" in stdout
+    assert "-c" in stdout
+    assert "-u" in stdout
+    assert "-p" in stdout
+    assert "--export" in stdout
+    assert "-e" in stdout
+    assert "--connection-type" in stdout
+    assert "-t" in stdout
 
 
 def test_index_selects_connection_string(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1329,13 +1336,14 @@ def test_search_help_documents_arguments() -> None:
     result = runner.invoke(app, ["search", "--help"])
 
     assert result.exit_code == 0
-    assert "directory" in result.stdout
-    assert "--project-id" in result.stdout
-    assert "-g" in result.stdout
-    assert "--cluster" in result.stdout
-    assert "-c" in result.stdout
-    assert "--export" in result.stdout
-    assert "-e" in result.stdout
+    stdout = _strip_ansi(result.stdout)
+    assert "directory" in stdout
+    assert "--project-id" in stdout
+    assert "-g" in stdout
+    assert "--cluster" in stdout
+    assert "-c" in stdout
+    assert "--export" in stdout
+    assert "-e" in stdout
 
 
 def test_search_exports_search_indexes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1548,13 +1556,14 @@ def test_trigger_help_documents_arguments() -> None:
     result = runner.invoke(app, ["trigger", "--help"])
 
     assert result.exit_code == 0
-    assert "directory" in result.stdout
-    assert "--project-id" in result.stdout
-    assert "-g" in result.stdout
-    assert "--cluster" in result.stdout
-    assert "-c" in result.stdout
-    assert "--export" in result.stdout
-    assert "-e" in result.stdout
+    stdout = _strip_ansi(result.stdout)
+    assert "directory" in stdout
+    assert "--project-id" in stdout
+    assert "-g" in stdout
+    assert "--cluster" in stdout
+    assert "-c" in stdout
+    assert "--export" in stdout
+    assert "-e" in stdout
 
 
 def test_trigger_exports_definitions(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
