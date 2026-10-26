@@ -1170,14 +1170,14 @@ def _print_search_export_summary(
 
 def _trigger_plan_rows(plan: TriggerPlan) -> list[tuple[str, str, str]]:
     order = {
-        TriggerAction.CREATE: 0,
-        TriggerAction.UPDATE: 1,
-        TriggerAction.DELETE: 2,
-        TriggerAction.IDENTICAL: 3,
+        TriggerAction.CREATE.value: 0,
+        TriggerAction.UPDATE.value: 1,
+        TriggerAction.DELETE.value: 2,
+        TriggerAction.IDENTICAL.value: 3,
     }
     items = sorted(
         plan.items,
-        key=lambda item: (order[item.action], item.name),
+        key=lambda item: (order[item.action.value], item.name),
     )
     return [(item.name, item.trigger_type, item.action.value) for item in items]
 

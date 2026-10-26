@@ -22,8 +22,10 @@ from atlas_ops.cli import (
     _format_index_table,
     _format_search_sync_table,
     _format_trigger_plan_table,
+    _trigger_plan_rows,
     app,
 )
+from atlas_ops.trigger.sync import TriggerAction, TriggerPlan, TriggerPlanItem
 
 runner = CliRunner()
 
@@ -1988,3 +1990,22 @@ def test_trigger_plan_actions_use_colors() -> None:
     assert "\x1b[31mdelete\x1b[0m" in table
     assert "\x1b[32mAction" not in table
     assert "identical" in table
+
+
+def test_trigger_plan_rows_sort_actions_for_plan_and_summary() -> None:
+    plan = TriggerPlan(
+        items=(
+            TriggerPlanItem("same", "DATABASE", TriggerAction.IDENTICAL, None, None),
+            TriggerPlanItem("old", "SCHEDULED", TriggerAction.DELETE, None, None),
+            TriggerPlanItem("changed", "DATABASE", TriggerAction.UPDATE, None, None),
+            TriggerPlanItem("new", "DATABASE", TriggerAction.CREATE, None, None),
+        ),
+        target_service_id=None,
+    )
+
+    assert _trigger_plan_rows(plan) == [
+        ("new", "DATABASE", "create"),
+        ("changed", "DATABASE", "update"),
+        ("old", "SCHEDULED", "delete"),
+        ("same", "DATABASE", "identical"),
+    ]
