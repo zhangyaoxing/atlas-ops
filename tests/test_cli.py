@@ -21,6 +21,7 @@ from atlas_ops.cli import (
     _format_export_table,
     _format_index_table,
     _format_search_sync_table,
+    _format_trigger_plan_table,
     app,
 )
 
@@ -1970,3 +1971,20 @@ def test_trigger_sync_aborts_when_preview_declined(
     assert "Aborted." in result.output
     assert app_client.trigger_create_calls == []
     assert app_client.function_create_calls == []
+
+
+def test_trigger_plan_actions_use_colors() -> None:
+    table = _format_trigger_plan_table(
+        [
+            ("new", "DATABASE", "create"),
+            ("changed", "SCHEDULED", "update"),
+            ("old", "DATABASE", "delete"),
+            ("same", "DATABASE", "identical"),
+        ]
+    )
+
+    assert "\x1b[32mcreate\x1b[0m" in table
+    assert "\x1b[33mupdate\x1b[0m" in table
+    assert "\x1b[31mdelete\x1b[0m" in table
+    assert "\x1b[32mAction" not in table
+    assert "identical" in table

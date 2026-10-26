@@ -981,6 +981,7 @@ def _format_markdown_table(
     *,
     numeric_columns: set[int],
     colors: dict[int, str] | None = None,
+    text_colors: dict[tuple[int, str], str] | None = None,
 ) -> str:
     table_rows = [headers, *rows, *([total] if total is not None else [])]
     widths = [max(len(str(row[index])) for row in table_rows) for index in range(len(headers))]
@@ -989,15 +990,22 @@ def _format_markdown_table(
         rendered: list[str] = []
         for index, value in enumerate(cells):
             text = str(value)
+            color = None
+            if colorize:
+                if index in numeric_columns:
+                    nonzero = text.replace("*", "").strip() != "0"
+                    if colors and index in colors and nonzero:
+                        color = colors[index]
+                elif text_colors and (index, text) in text_colors:
+                    color = text_colors[(index, text)]
             if index in numeric_columns:
                 padding = " " * (widths[index] - len(text))
-                nonzero = text.replace("*", "").strip() != "0"
-                if colorize and colors and index in colors and nonzero:
-                    rendered.append(padding + typer.style(text, fg=colors[index]))
-                else:
-                    rendered.append(padding + text)
+                content = typer.style(text, fg=color) if color else text
+                rendered.append(padding + content)
             else:
-                rendered.append(text.ljust(widths[index]))
+                padding = " " * (widths[index] - len(text))
+                content = typer.style(text, fg=color) if color else text
+                rendered.append(content + padding)
         return f"| {' | '.join(rendered)} |"
 
     separators = [
@@ -1179,6 +1187,11 @@ def _format_trigger_plan_table(rows: Sequence[tuple[str, str, str]]) -> str:
         ("Trigger", "Type", "Action"),
         rows,
         numeric_columns=set(),
+        text_colors={
+            (2, "create"): typer.colors.GREEN,
+            (2, "update"): typer.colors.YELLOW,
+            (2, "delete"): typer.colors.RED,
+        },
     )
 
 

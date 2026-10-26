@@ -465,7 +465,9 @@ Trigger change preview (3 trigger(s)):
 | unchanged    | DATABASE  | identical |
 ```
 
-After confirmation, the final summary uses the same rows:
+In terminal output, `create` is green, `update` is yellow, and `delete` is red;
+`identical` and the table headers stay unstyled. After confirmation, the final
+summary uses the same rows:
 
 ```text
 Trigger sync complete: 1 created, 1 updated, 1 skipped, 1 deleted; 1 orphan function(s) deleted.
