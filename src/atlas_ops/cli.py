@@ -870,7 +870,13 @@ def _format_index_table(rows: list[tuple[str, int, int, int]]) -> str:
         f"**{sum(row[2] for row in rows)}**",
         f"**{sum(row[3] for row in rows)}**",
     )
-    return _format_markdown_table(headers, body, total, numeric_columns={1, 2, 3})
+    return _format_markdown_table(
+        headers,
+        body,
+        total,
+        numeric_columns={1, 2, 3},
+        colors={1: typer.colors.GREEN, 3: typer.colors.RED},
+    )
 
 
 def _print_export_summary(
@@ -913,17 +919,23 @@ def _format_markdown_table(
     total: Sequence[object],
     *,
     numeric_columns: set[int],
+    colors: dict[int, str] | None = None,
 ) -> str:
     table_rows = [headers, *rows, total]
     widths = [max(len(str(row[index])) for row in table_rows) for index in range(len(headers))]
 
-    def render(cells: Sequence[object]) -> str:
+    def render(cells: Sequence[object], *, colorize: bool = False) -> str:
         rendered: list[str] = []
         for index, value in enumerate(cells):
             text = str(value)
-            rendered.append(
-                text.rjust(widths[index]) if index in numeric_columns else text.ljust(widths[index])
-            )
+            if index in numeric_columns:
+                padding = " " * (widths[index] - len(text))
+                if colorize and colors and index in colors:
+                    rendered.append(padding + typer.style(text, fg=colors[index]))
+                else:
+                    rendered.append(padding + text)
+            else:
+                rendered.append(text.ljust(widths[index]))
         return f"| {' | '.join(rendered)} |"
 
     separators = [
@@ -931,8 +943,8 @@ def _format_markdown_table(
         for index, width in enumerate(widths)
     ]
     lines = [render(headers), f"| {' | '.join(separators)} |"]
-    lines.extend(render(row) for row in rows)
-    lines.append(render(total))
+    lines.extend(render(row, colorize=True) for row in rows)
+    lines.append(render(total, colorize=True))
     return "\n".join(lines)
 
 
@@ -1012,6 +1024,11 @@ def _format_search_sync_table(rows: Sequence[tuple[str, int, int, int, int]]) ->
         rows,
         total,
         numeric_columns={1, 2, 3, 4},
+        colors={
+            1: typer.colors.GREEN,
+            2: typer.colors.YELLOW,
+            4: typer.colors.RED,
+        },
     )
 
 

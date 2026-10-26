@@ -17,7 +17,12 @@ from pymongo.errors import PyMongoError
 from typer.testing import CliRunner
 
 from atlas_ops import __version__
-from atlas_ops.cli import _format_export_table, app
+from atlas_ops.cli import (
+    _format_export_table,
+    _format_index_table,
+    _format_search_sync_table,
+    app,
+)
 
 runner = CliRunner()
 
@@ -1778,3 +1783,16 @@ def test_search_aborts_when_preview_declined(
     assert client.search_create_calls == []
     assert client.search_update_calls == []
     assert client.search_delete_calls == []
+
+
+def test_summary_numbers_use_change_colors() -> None:
+    index_table = _format_index_table([("exampleDB.example", 1, 2, 3)])
+    assert "\x1b[32m1\x1b[0m" in index_table
+    assert "\x1b[31m3\x1b[0m" in index_table
+    assert "\x1b[32mCreated" not in index_table
+
+    search_table = _format_search_sync_table([("exampleDB.example", 1, 2, 3, 4)])
+    assert "\x1b[32m1\x1b[0m" in search_table
+    assert "\x1b[33m2\x1b[0m" in search_table
+    assert "\x1b[31m4\x1b[0m" in search_table
+    assert "\x1b[33mUpdated" not in search_table
