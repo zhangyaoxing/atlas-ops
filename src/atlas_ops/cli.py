@@ -94,6 +94,7 @@ from atlas_ops.trigger.sync import (
     find_triggers_app,
     plan_trigger_sync,
 )
+from atlas_ops.utils import green, red, style_color, yellow
 
 logger = logging.getLogger(__name__)
 
@@ -757,9 +758,8 @@ def _prompt_project() -> str:
         value = typer.prompt("Project ID (24 hexadecimal characters)").strip()
         if is_object_id(value):
             return value
-        typer.secho(
-            "Project ID must be 24 hexadecimal characters.",
-            fg=typer.colors.YELLOW,
+        typer.echo(
+            yellow("Project ID must be 24 hexadecimal characters."),
             err=True,
         )
 
@@ -769,7 +769,7 @@ def _prompt_cluster() -> str:
         value = typer.prompt("Cluster ID or name").strip()
         if value:
             return value
-        typer.secho("Cluster ID or name must not be empty.", fg=typer.colors.YELLOW, err=True)
+        typer.echo(yellow("Cluster ID or name must not be empty."), err=True)
 
 
 def _choose_cluster(matches: list[ClusterTarget]) -> ClusterTarget:
@@ -822,18 +822,11 @@ def _prompt_choice(count: int, label: str) -> int:
         choice = typer.prompt(label, type=int)
         if 1 <= choice <= count:
             return choice - 1
-        typer.secho(f"Enter a number between 1 and {count}.", fg=typer.colors.YELLOW, err=True)
+        typer.echo(yellow(f"Enter a number between 1 and {count}."), err=True)
 
 
 def _change_warning(target: ClusterTarget, resource: str) -> str:
     org = target.org_name or target.org_id or "unknown organization"
-
-    def yellow(value: str) -> str:
-        return typer.style(value, fg=typer.colors.YELLOW)
-
-    def green(value: str) -> str:
-        return typer.style(value, fg=typer.colors.GREEN)
-
     return (
         yellow(f"Heads up! {resource} in ")
         + green(org)
@@ -1031,11 +1024,11 @@ def _format_markdown_table(
                     color = text_colors[(index, text)]
             if index in numeric_columns:
                 padding = " " * (widths[index] - len(text))
-                content = typer.style(text, fg=color) if color else text
+                content = style_color(text, color) if color else text
                 rendered.append(padding + content)
             else:
                 padding = " " * (widths[index] - len(text))
-                content = typer.style(text, fg=color) if color else text
+                content = style_color(text, color) if color else text
                 rendered.append(content + padding)
         return f"| {' | '.join(rendered)} |"
 
@@ -1285,5 +1278,5 @@ def _format_utc(value: datetime) -> str:
 
 
 def _fail(message: str) -> NoReturn:
-    typer.secho(message, fg=typer.colors.RED, err=True)
+    typer.echo(red(message), err=True)
     raise typer.Exit(code=1)

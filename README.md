@@ -668,6 +668,7 @@ source .venv/bin/activate
 │       │   ├── export.py             # export App Services trigger definitions
 │       │   └── sync.py               # create/update/delete triggers and functions
 │       ├── log.py                    # logging config (RichHandler, stderr)
+│       ├── utils.py                  # terminal yellow/green/red helpers
 │       └── errors.py                 # user-facing error types
 └── tests/
     ├── conftest.py                   # isolate working directory from a real .env
