@@ -842,6 +842,13 @@ def _collection_summary(
                 deleted_count,
             )
         )
+    summary.sort(
+        key=lambda row: (
+            0 if row[1] or row[3] else 1,
+            -(row[1] + row[3]),
+            row[0],
+        )
+    )
     return summary
 
 
@@ -996,6 +1003,13 @@ def _search_sync_rows(
     for database, collection in order:
         created, updated, unchanged, deleted = counts[(database, collection)]
         rows.append((f"{database}.{collection}", created, updated, unchanged, deleted))
+    rows.sort(
+        key=lambda row: (
+            0 if row[1] or row[2] or row[4] else 1,
+            -(row[1] + row[2] + row[4]),
+            row[0],
+        )
+    )
     return rows
 
 

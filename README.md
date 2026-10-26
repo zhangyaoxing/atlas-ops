@@ -212,7 +212,8 @@ Index summary (2 collection(s) from /path/to/definitions):
 Skipped = identical or options-conflict indexes.
 
 In terminal output, non-zero Created numbers are green and non-zero Deleted numbers
-are red; zero values and headers stay unstyled.
+are red; zero values and headers stay unstyled. Rows with Created or Deleted counts
+are listed first, with the largest change counts first.
 
 With `--export`, steps 1 (read definitions) and 8–14 (preview and apply/delete
 indexes) are skipped. After connecting to MongoDB, the tool enters export mode,
@@ -368,6 +369,8 @@ Sync behavior:
 
 Non-zero Created numbers are green, Updated numbers are yellow, and Deleted numbers
 are red in terminal output; zero values, headers, and other cells stay unstyled.
+Rows with Created, Updated, or Deleted counts are listed first, with the largest
+change counts first.
 
 #### Search export mode
 
