@@ -1,5 +1,8 @@
 # atlas-ops
 
+[![CI](https://github.com/zhangyaoxing/atlas-ops/actions/workflows/ci.yml/badge.svg)](https://github.com/zhangyaoxing/atlas-ops/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/atlas-ops.svg)](https://pypi.org/project/atlas-ops/)
+
 Command-line tool for MongoDB Atlas operations.
 
 ## Requirements
@@ -489,6 +492,9 @@ source .venv/bin/activate
 ├── pyrightconfig.json                # Pyright/Pylance configuration
 ├── .env.example                      # environment variable template (copy to .env)
 ├── .vscode/                          # VS Code debug, test, and format config
+├── .github/
+│   └── workflows/
+│       └── ci.yml                    # GitHub Actions CI
 ├── LICENSE                           # project license
 ├── examples/indexes/                 # sample index definitions
 │   ├── exampleDB.example.json
