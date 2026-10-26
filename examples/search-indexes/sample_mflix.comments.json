@@ -7,7 +7,15 @@
       "type": "search",
       "definition": {
         "mappings": {
-          "dynamic": true
+          "dynamic": false,
+          "fields": {
+            "date": {
+              "type": "date"
+            },
+            "email": {
+              "type": "string"
+            }
+          }
         }
       }
     }
