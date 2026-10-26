@@ -1,0 +1,28 @@
+{
+  "database": "sample_mflix",
+  "collection": "movies",
+  "trigger": {
+    "name": "movie_delete",
+    "type": "DATABASE",
+    "disabled": false,
+    "config": {
+      "operation_types": [
+        "DELETE"
+      ],
+      "database": "sample_mflix",
+      "collection": "movies",
+      "match": {},
+      "project": {},
+      "full_document": false,
+      "full_document_before_change": false,
+      "unordered": false,
+      "skip_catchup_events": false,
+      "tolerate_resume_errors": false,
+      "maximum_throughput": false
+    }
+  },
+  "function": {
+    "private": true,
+    "source": "exports = async function(changeEvent) {\n  // A Database Trigger will always call a function with a changeEvent.\n  // Documentation on ChangeEvents: https://docs.mongodb.com/manual/reference/change-events/\n\n  // This sample function will listen for events and replicate them to a collection in a different Database\n\n  // Access the _id of the changed document:\n  const docId = changeEvent.documentKey._id;\n\n  // Get the MongoDB service you want to use (see \"Linked Data Sources\" tab)\n  // Note: In Atlas Triggers, the service name is defaulted to the cluster name.\n  const serviceName = \"mongodb-atlas\";\n  const database = \"other_db\";\n  const collection = context.services.get(serviceName).db(database).collection(changeEvent.ns.coll);\n\n  // Get the \"FullDocument\" present in the Insert/Replace/Update ChangeEvents\n  try {\n    // If this is a \"delete\" event, delete the document in the other collection\n    if (changeEvent.operationType === \"delete\") {\n      await collection.deleteOne({\"_id\": docId});\n    }\n\n    // If this is an \"insert\" event, insert the document into the other collection\n    else if (changeEvent.operationType === \"insert\") {\n      await collection.insertOne(changeEvent.fullDocument);\n    }\n\n    // If this is an \"update\" or \"replace\" event, then replace the document in the other collection\n    else if (changeEvent.operationType === \"update\" || changeEvent.operationType === \"replace\") {\n      await collection.replaceOne({\"_id\": docId}, changeEvent.fullDocument);\n    }\n  } catch(err) {\n    console.log(\"error performing mongodb write: \", err.message);\n  }\n};"
+  }
+}

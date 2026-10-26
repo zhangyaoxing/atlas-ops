@@ -1,0 +1,16 @@
+{
+  "trigger": {
+    "name": "scheduled_1",
+    "type": "SCHEDULED",
+    "disabled": false,
+    "config": {
+      "schedule": "0 */1 * * *",
+      "schedule_type": "BASIC",
+      "skip_catchup_events": false
+    }
+  },
+  "function": {
+    "private": true,
+    "source": "exports = async function() {\n  // A Scheduled Trigger will always call a function without arguments.\n  // Documentation on Triggers: https://www.mongodb.com/docs/atlas/atlas-ui/triggers\n\n  // Functions run by Triggers are run as System users and have full access to Services, Functions, and MongoDB Data.\n\n  // Get the MongoDB service you want to use (see \"Linked Data Sources\" tab)\n  const serviceName = \"Cluster0\";\n  const databaseName = \"sample_mflix\";\n  const collectionName = \"movies\";\n  const collection = context.services.get(serviceName).db(databaseName).collection(collectionName);\n\n  try {\n    const doc = await collection.findOne({ name: \"mongodb\" });\n  } catch (err) {\n    console.log(\"error performing mongodb findOne: \", err.message);\n  }\n};\n"
+  }
+}
