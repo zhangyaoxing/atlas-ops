@@ -21,7 +21,7 @@ class AppServicesClientLike(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class TriggerCollection:
-    """One collection written during a trigger export."""
+    """One collection in a trigger export summary."""
 
     database: str
     collection: str
@@ -30,7 +30,7 @@ class TriggerCollection:
 
 @dataclass(frozen=True, slots=True)
 class TriggerExportResult:
-    """Collection files, apps, and triggers written during an export."""
+    """Trigger files, apps, and collection counts written during an export."""
 
     files: int
     triggers: int
@@ -45,17 +45,17 @@ def export_triggers(
     cluster_id: str,
     directory: Path,
 ) -> TriggerExportResult:
-    """Export database triggers related to *cluster_name* by namespace.
+    """Export database triggers related to *cluster_name* as one file each.
 
     Each App Services app is inspected for data sources linked to the target
     cluster. Only ``DATABASE`` triggers on those data sources that name both a
-    database and a collection are exported. Results are grouped into
-    ``<database>.<collection>.json`` files, with app context retained for each
-    trigger. Server-managed trigger ``_id`` values are removed.
+    database and a collection are exported. Every trigger is written to
+    ``<database>.<collection>.<trigger>.json`` together with its associated
+    function. Server-managed ``_id`` values are removed.
     """
     directory.mkdir(parents=True, exist_ok=True)
 
-    grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    entries: list[dict[str, Any]] = []
     apps_with_triggers: set[str] = set()
 
     for app in _list_apps(client, project_id):
@@ -116,8 +116,10 @@ def export_triggers(
             ):
                 continue
 
-            grouped.setdefault((database, collection), []).append(
+            entries.append(
                 {
+                    "database": database,
+                    "collection": collection,
                     "appId": app_id,
                     "appName": app_name,
                     "trigger": definition,
@@ -133,40 +135,60 @@ def export_triggers(
             )
             apps_with_triggers.add(app_id)
 
-    files = 0
-    triggers = 0
-    exported: list[TriggerCollection] = []
-    for database, collection in sorted(grouped):
-        entries = grouped[(database, collection)]
-        entries.sort(
-            key=lambda item: (
-                str(item["appName"]),
-                str(item["trigger"].get("name") or ""),
-            )
+    collection_counts: dict[tuple[str, str], int] = {}
+    grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    for entry in entries:
+        database = entry["database"]
+        collection = entry["collection"]
+        trigger = entry["trigger"]
+        name = trigger.get("name")
+        if not isinstance(name, str) or not name:
+            continue
+        collection_counts[(database, collection)] = (
+            collection_counts.get((database, collection), 0) + 1
         )
-        document = {
-            "database": database,
-            "collection": collection,
-            "triggers": entries,
-        }
-        path = directory / json_filename(database, collection)
-        path.write_text(
-            json.dumps(document, indent=2, ensure_ascii=False, default=str) + "\n",
-            encoding="utf-8",
-        )
-        files += 1
-        triggers += len(entries)
-        exported.append(
-            TriggerCollection(
-                database=database,
-                collection=collection,
-                triggers=len(entries),
-            )
-        )
+        grouped.setdefault((database, collection, name), []).append(entry)
 
+    files = 0
+    used_filenames: set[str] = set()
+    for database, collection, name in sorted(grouped):
+        group = grouped[(database, collection, name)]
+        group.sort(key=lambda item: (str(item["appName"]), str(item["appId"])))
+        for entry in group:
+            parts = [database, collection, name]
+            if len(group) > 1:
+                parts.append(str(entry["appName"]))
+            filename = json_filename(*parts)
+            if filename in used_filenames:
+                filename = json_filename(*parts, str(entry["appId"]))
+            suffix = 2
+            while filename in used_filenames:
+                filename = json_filename(*parts, str(entry["appId"]), str(suffix))
+                suffix += 1
+            used_filenames.add(filename)
+
+            document = {
+                "database": database,
+                "collection": collection,
+                "appId": entry["appId"],
+                "appName": entry["appName"],
+                "trigger": entry["trigger"],
+                "function": entry["function"],
+            }
+            path = directory / filename
+            path.write_text(
+                json.dumps(document, indent=2, ensure_ascii=False, default=str) + "\n",
+                encoding="utf-8",
+            )
+            files += 1
+
+    exported = [
+        TriggerCollection(database=database, collection=collection, triggers=count)
+        for (database, collection), count in sorted(collection_counts.items())
+    ]
     return TriggerExportResult(
         files=files,
-        triggers=triggers,
+        triggers=files,
         apps=len(apps_with_triggers),
         collections=tuple(exported),
     )

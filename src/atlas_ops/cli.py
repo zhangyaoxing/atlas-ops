@@ -523,9 +523,10 @@ def trigger(
                 directory,
             )
             logger.info(
-                "Exported %d trigger(s) from %d collection(s) across %d app(s).",
+                "Exported %d trigger(s) in %d file(s) from %d collection(s) across %d app(s).",
                 result.triggers,
                 result.files,
+                len(result.collections),
                 result.apps,
             )
     except OpsError as exc:
@@ -896,11 +897,15 @@ def _print_export_summary(
     )
 
 
-def _format_export_table(rows: list[tuple[str, int]], first_header: str = "Collection") -> str:
+def _format_export_table(
+    rows: list[tuple[str, int]],
+    first_header: str = "Collection",
+    second_header: str = "Exported",
+) -> str:
     body = [(_markdown_cell(namespace), count) for namespace, count in rows]
     total = ("**Total**", f"**{sum(count for _, count in rows)}**")
     return _format_markdown_table(
-        (first_header, "Exported"),
+        (first_header, second_header),
         body,
         total,
         numeric_columns={1},
@@ -1103,13 +1108,14 @@ def _print_trigger_export_summary(
     typer.echo("")
 
     rows = [(f"{item.database}.{item.collection}", item.triggers) for item in result.collections]
-    typer.echo(f"Trigger export summary ({result.files} collection(s) from {directory}):")
+    typer.echo(f"Trigger export summary ({result.files} file(s) from {directory}):")
     typer.echo("")
-    typer.echo(_format_export_table(rows))
+    typer.echo(_format_export_table(rows, second_header="Triggers"))
     typer.echo("")
     typer.echo(
-        f"Exported {result.triggers} trigger(s) from {result.files} "
-        f"collection(s) across {result.apps} app(s) to {directory}."
+        f"Exported {result.triggers} trigger(s) in {result.files} file(s) from "
+        f"{len(result.collections)} collection(s) across {result.apps} app(s) "
+        f"to {directory}."
     )
 
 

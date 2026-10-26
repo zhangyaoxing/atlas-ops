@@ -222,7 +222,7 @@ def test_export_filters_by_cluster_and_groups_by_collection(
     )
 
     assert result == TriggerExportResult(
-        files=2,
+        files=3,
         triggers=3,
         apps=2,
         collections=(
@@ -230,32 +230,35 @@ def test_export_filters_by_cluster_and_groups_by_collection(
             TriggerCollection(database="other_db", collection="other_coll", triggers=1),
         ),
     )
-    payload = json.loads((tmp_path / "db.coll.json").read_text(encoding="utf-8"))
-    assert payload["database"] == "db"
-    assert payload["collection"] == "coll"
-    assert [entry["trigger"]["name"] for entry in payload["triggers"]] == [
-        "on-insert",
-        "on-update",
-    ]
-    assert [entry["appName"] for entry in payload["triggers"]] == [
-        "my-app",
-        "my-app",
-    ]
-    assert all("_id" not in entry["trigger"] for entry in payload["triggers"])
-    assert payload["triggers"][1]["trigger"]["disabled"] is True
-    assert payload["triggers"][0]["function"] == {
+    insert = json.loads((tmp_path / "db.coll.on-insert.json").read_text(encoding="utf-8"))
+    assert insert["database"] == "db"
+    assert insert["collection"] == "coll"
+    assert insert["appId"] == "app-1"
+    assert insert["appName"] == "my-app"
+    assert insert["trigger"]["name"] == "on-insert"
+    assert insert["trigger"]["type"] == "DATABASE"
+    assert "_id" not in insert["trigger"]
+    assert insert["function"] == {
         "name": "fn-two",
         "private": False,
         "source": "exports = function() { return 2; };",
     }
-    assert payload["triggers"][1]["function"] == {
+
+    update = json.loads((tmp_path / "db.coll.on-update.json").read_text(encoding="utf-8"))
+    assert update["trigger"]["name"] == "on-update"
+    assert update["trigger"]["disabled"] is True
+    assert update["function"] == {
         "name": "fn-one",
         "private": True,
         "source": "exports = function() { return 1; };",
     }
-    other_payload = json.loads((tmp_path / "other_db.other_coll.json").read_text(encoding="utf-8"))
-    assert other_payload["triggers"][0]["function"] is None
-    assert (tmp_path / "other_db.other_coll.json").exists()
+
+    other = json.loads(
+        (tmp_path / "other_db.other_coll.other-trigger.json").read_text(encoding="utf-8")
+    )
+    assert other["trigger"]["name"] == "other-trigger"
+    assert other["function"] is None
+
     assert client.apps.calls == [
         ("project-1", None),
         ("project-1", "atlas"),
@@ -339,7 +342,7 @@ def test_export_sanitizes_namespace_filename(tmp_path: Path) -> None:
 
     export_triggers(client, "project-1", "cluster0", "cluster-id", tmp_path)
 
-    assert (tmp_path / "db.a_b.json").exists()
+    assert (tmp_path / "db.a_b.on-insert.json").exists()
 
 
 def test_export_matches_service_by_cluster_id(tmp_path: Path) -> None:
@@ -379,4 +382,55 @@ def test_export_matches_service_by_cluster_id(tmp_path: Path) -> None:
     )
 
     assert result.triggers == 1
-    assert (tmp_path / "db.coll.json").exists()
+    assert (tmp_path / "db.coll.on-insert.json").exists()
+
+
+def test_export_disambiguates_duplicate_trigger_names_with_app(
+    tmp_path: Path,
+) -> None:
+    client = FakeClient(
+        {
+            None: [
+                SimpleNamespace(id="app-1", name="app-one"),
+                SimpleNamespace(id="app-2", name="app-two"),
+            ]
+        },
+        {
+            "app-1": [{"_id": "svc-1", "type": "mongodb-atlas", "name": "cluster0"}],
+            "app-2": [{"_id": "svc-2", "type": "mongodb-atlas", "name": "cluster0"}],
+        },
+        {
+            "app-1": [
+                {
+                    "_id": "trigger-1",
+                    "name": "on-insert",
+                    "type": "DATABASE",
+                    "config": {
+                        "service_id": "svc-1",
+                        "database": "db",
+                        "collection": "coll",
+                    },
+                }
+            ],
+            "app-2": [
+                {
+                    "_id": "trigger-2",
+                    "name": "on-insert",
+                    "type": "DATABASE",
+                    "config": {
+                        "service_id": "svc-2",
+                        "database": "db",
+                        "collection": "coll",
+                    },
+                }
+            ],
+        },
+    )
+
+    result = export_triggers(client, "project-1", "cluster0", "", tmp_path)
+
+    assert result.files == 2
+    assert result.triggers == 2
+    assert result.collections == (TriggerCollection(database="db", collection="coll", triggers=2),)
+    assert (tmp_path / "db.coll.on-insert.app-one.json").exists()
+    assert (tmp_path / "db.coll.on-insert.app-two.json").exists()

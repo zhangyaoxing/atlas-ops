@@ -434,64 +434,64 @@ Behavior:
   and a collection
 - Resolves each trigger's associated function from `function_id`, `function_name`, or
   `event_processors.FUNCTION`, then fetches the full function definition
-- Writes one file per collection: `<database>.<collection>.json`
-- Adds a `function` subdocument next to each `trigger`
+- Writes one file per trigger: `<database>.<collection>.<trigger>.json`
+- Adds a `function` subdocument next to `trigger`
 - Removes server-managed `_id` and `last_modified` values from both trigger and
   function definitions; other definition fields are preserved
-- Includes `appId` and `appName` for each trigger so multiple apps can share a
-  collection file
+- Includes `appId` and `appName` for context; the trigger `name` is the stable key
+- If two apps expose the same trigger name for the same namespace, the app name is
+  appended to the filename to avoid overwriting
 - Collections without matching triggers produce no file
 - Unsafe filename characters are replaced with `_`
 - The run ends with a per-collection Markdown table and total count:
 
   ```text
-  Trigger export summary (1 collection(s) from /path/to/exported-triggers):
+  Trigger export summary (3 file(s) from /path/to/exported-triggers):
 
-  | Collection        | Exported |
+  | Collection        | Triggers |
   | ----------------- | -------: |
   | exampleDB.example |        2 |
-  | **Total**         |    **2** |
+  | exampleDB.other   |        1 |
+  | **Total**         |    **3** |
   ```
 
-Trigger file format:
+Trigger file format (`exampleDB.example.on-insert.json`):
 
 ```json
 {
   "database": "exampleDB",
   "collection": "example",
-  "triggers": [
-    {
-      "appId": "65f1a2b3c4d5e6f7a8b9c0d1",
-      "appName": "my-app",
-      "trigger": {
-        "name": "on-insert",
-        "type": "DATABASE",
-        "disabled": false,
-        "config": {
-          "service_id": "...",
-          "database": "exampleDB",
-          "collection": "example",
-          "operation_types": ["INSERT"]
-        },
-        "function_id": "..."
-      },
-      "function": {
-        "name": "on-insert-function",
-        "private": true,
-        "source": "exports = function(changeEvent) { ... };"
-      }
-    }
-  ]
+  "appId": "65f1a2b3c4d5e6f7a8b9c0d1",
+  "appName": "my-app",
+  "trigger": {
+    "name": "on-insert",
+    "type": "DATABASE",
+    "disabled": false,
+    "config": {
+      "service_id": "...",
+      "database": "exampleDB",
+      "collection": "example",
+      "operation_types": ["INSERT"]
+    },
+    "function_id": "..."
+  },
+  "function": {
+    "name": "on-insert-function",
+    "private": true,
+    "source": "exports = function(changeEvent) { ... };"
+  }
 }
 ```
 
 `function` is `null` if the trigger has no resolvable function. The function source
-code is included so the trigger can be recreated together with its function.
+code is included so the trigger can be recreated together with its function. The
+`appId`, `function_id`, and `config.service_id` values are environment-specific; a
+future name-keyed sync can ignore them and match triggers by `trigger.name`.
 
-The final summary line also reports the number of contributing apps:
+The final summary line also reports file, collection, and app counts:
 
 ```text
-Exported 2 trigger(s) from 1 collection(s) across 1 app(s) to /path/to/exported-triggers.
+Exported 3 trigger(s) in 3 file(s) from 2 collection(s) across 1 app(s) to /path/to/exported-triggers.
 ```
 
 The Atlas API key needs App Services admin access for the project, for example
