@@ -401,64 +401,82 @@ the command never opens a MongoDB connection.
 
 ### `trigger`
 
-Export App Services database triggers related to one Atlas cluster, plus all
-scheduled triggers. The command uses the SDK's App Services Admin client
-(`AtlasAppAdminClient`), so it needs Atlas API credentials, a project ID, and a
-cluster; it does not connect to MongoDB or create a temporary database user. Only
-export mode is implemented so far.
+Synchronize local App Services trigger definitions to the target project's
+`Triggers` app. Database triggers are cluster-scoped; scheduled triggers are
+included. With `--export`, write definitions to JSON files instead.
+
+The command uses the App Services Admin client (`AtlasAppAdminClient`) and Atlas
+Admin credentials. It does not connect to MongoDB or create a temporary database
+user.
 
 ```bash
-mkdir -p ./exported-triggers
+# Sync local definitions to the target Triggers app
+uv run atlas-ops trigger ./triggers \
+  --project-id 64f1a2b3c4d5e6f7a8b9c0d1 --cluster cluster0
+
+# Export triggers to a directory
 uv run atlas-ops trigger ./exported-triggers \
-  --project-id 64f1a2b3c4d5e6f7a8b9c0d1 \
-  --cluster cluster0 \
-  --export
+  --project-id 64f1a2b3c4d5e6f7a8b9c0d1 --cluster cluster0 --export
 ```
 
 Arguments:
 
-- `DIRECTORY`: output directory for trigger JSON files (must already exist)
+- `DIRECTORY`: input directory with `*.json` trigger files in the default mode;
+  output directory with `--export` (must already exist)
 
 Options:
 
 - `-g, --project-id`: project ID; falls back to `ATLAS_PROJECT_ID`, then prompts
 - `-c, --cluster`: cluster ID or name; falls back to `ATLAS_CLUSTER_NAME`, then prompts
-- `-e, --export`: export mode; required for now
+- `-e, --export`: export triggers instead of syncing definitions
 
-Behavior:
+#### Trigger sync
 
-- Logs in to the App Services Admin API with the Atlas API key pair
-- Scans both standard apps and the special `atlas` product app
-- Inspects each app's MongoDB data sources and keeps `DATABASE` triggers linked to
-  the target cluster (matched by cluster name or ID) that specify both a database
-  and a collection
-- Also includes all `SCHEDULED` triggers; they have no database/collection
-- Resolves each trigger's associated function from `function_id`, `function_name`, or
-  `event_processors.FUNCTION`, then fetches the full function definition
-- Writes one file per trigger, named only after the trigger: `<trigger>.json`
-- Adds a `function` subdocument next to `trigger`
-- Removes server-managed `_id` and `last_modified` values
-- Also removes environment-specific values so the files can be synced to another
-  project: `appId`, `appName`, trigger `function_id` / `function_name`,
-  `event_processors`, `config.service_id`, `config.clusterName`, and function
-  `name` / `run_as_user_id`
-- The trigger `name` is the stable key used by a future name-keyed sync, so names
-  must be unique across exported apps; a duplicate name is an error
-- Unsafe filename characters are replaced with `_`
-- The run ends with a per-scope Markdown table and total count:
+The target app must be named `Triggers`. Remote triggers are matched by
+`trigger.name`, so the local trigger name is the stable key across environments.
 
-  ```text
-  Trigger export summary (4 file(s) from /path/to/exported-triggers):
+- **Create**: create the function first using a unique generated name
+  (`Atlas_Triggers_<trigger>`, with a numeric suffix when needed), then create the
+  trigger with `function_id` set to the new function
+- **Update**: fetch the current remote trigger and use it as the template, overlay
+  the local `name`, `type`, `disabled`, and `config`, then update the target
+  function associated with that trigger. Target-only values such as
+  `config.service_id`, `config.clusterName`, `function_id`, and `function_name` are
+  preserved
+- **Delete**: remote triggers missing from the local files are deleted after
+  confirmation. The API leaves the associated function behind, so the function is
+  also deleted when no remaining trigger references it; shared functions are kept
+- **Identical**: skipped
 
-  | Scope             | Triggers |
-  | ----------------- | -------: |
-  | exampleDB.example |        2 |
-  | exampleDB.other   |        1 |
-  | scheduled         |        1 |
-  | **Total**         |    **4** |
-  ```
+Database triggers need a target data source for the selected cluster when they are
+created; existing triggers keep their target `service_id`. Scheduled triggers do not
+need a data source.
 
-Database trigger file format (`on-insert.json`):
+Before applying changes, a preview is shown and must be confirmed (default: no):
+
+```text
+Trigger change preview (3 trigger(s)):
+
+| Trigger      | Type      | Action |
+| ------------ | --------- | ------ |
+| new-trigger  | DATABASE  | create |
+| changed      | SCHEDULED | update |
+| removed      | DATABASE  | delete |
+| unchanged    | DATABASE  | identical |
+```
+
+After confirmation, the final summary uses the same rows:
+
+```text
+Trigger sync complete: 1 created, 1 updated, 1 skipped, 1 deleted; 1 orphan function(s) deleted.
+```
+
+#### Trigger file format
+
+One file per trigger, named only after the trigger: `<trigger>.json`. Database
+triggers include `database` and `collection`; scheduled triggers do not.
+
+Database trigger (`on-insert.json`):
 
 ```json
 {
@@ -481,7 +499,7 @@ Database trigger file format (`on-insert.json`):
 }
 ```
 
-A scheduled trigger file (`nightly.json`) has no top-level database/collection:
+Scheduled trigger (`nightly.json`):
 
 ```json
 {
@@ -499,16 +517,33 @@ A scheduled trigger file (`nightly.json`) has no top-level database/collection:
 }
 ```
 
-`function` is `null` if the trigger has no resolvable function. The function source
-code is included so the trigger can be recreated together with its function. A
-future sync can match triggers by `trigger.name`, resolve the target trigger's own
-function reference, and update that function with the exported definition.
+The local files intentionally omit environment-specific values: `appId`,
+`appName`, trigger `function_id` / `function_name`, `event_processors`,
+`config.service_id`, `config.clusterName`, and function `name` / `run_as_user_id`.
+Server-managed `_id` and `last_modified` values are also omitted. Trigger names
+must be unique because the name is also the filename and sync key.
 
-The final summary line reports file and app counts:
+#### Trigger export mode
 
-```text
-Exported 4 trigger(s) in 4 file(s) across 1 app(s) to /path/to/exported-triggers.
-```
+`--export` writes one file per trigger using the format above. It:
+
+- Scans standard apps and the special `atlas` product app
+- Keeps `DATABASE` triggers linked to the target cluster and all `SCHEDULED`
+  triggers
+- Fetches each trigger's associated function
+- Rejects duplicate trigger names and sanitizes unsafe filename characters
+- Prints a per-scope summary:
+
+  ```text
+  Trigger export summary (4 file(s) from /path/to/exported-triggers):
+
+  | Scope             | Triggers |
+  | ----------------- | -------: |
+  | exampleDB.example |        2 |
+  | exampleDB.other   |        1 |
+  | scheduled         |        1 |
+  | **Total**         |    **4** |
+  ```
 
 The Atlas API key needs App Services admin access for the project, for example
 Project Owner.
@@ -616,7 +651,9 @@ source .venv/bin/activate
 │       │   └── export.py             # export Atlas Search index definitions
 │       ├── trigger/
 │       │   ├── __init__.py
-│       │   └── export.py             # export App Services trigger definitions
+│       │   ├── definitions.py        # load local trigger definition files
+│       │   ├── export.py             # export App Services trigger definitions
+│       │   └── sync.py               # create/update/delete triggers and functions
 │       ├── log.py                    # logging config (RichHandler, stderr)
 │       └── errors.py                 # user-facing error types
 └── tests/
@@ -631,7 +668,8 @@ source .venv/bin/activate
     ├── search/
     │   └── test_search_export.py     # Atlas Search export tests
     ├── trigger/
-    │   └── test_trigger_export.py    # App Services trigger export tests
+    │   ├── test_trigger_export.py    # App Services trigger export tests
+    │   └── test_trigger_sync.py      # trigger/function sync tests
     ├── test_cli.py                   # end-to-end CLI tests
     ├── test_atlas.py                 # Atlas helper tests
     ├── test_env.py                   # .env loading tests

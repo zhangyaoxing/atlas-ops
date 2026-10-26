@@ -27,5 +27,13 @@ class TriggerExportError(OpsError):
     """Raised when trigger definitions cannot be written unambiguously."""
 
 
+class TriggerDefinitionError(OpsError):
+    """Raised when one or more trigger definition files are invalid."""
+
+
+class TriggerSyncError(OpsError):
+    """Raised when trigger synchronization cannot complete."""
+
+
 class AtlasOperationError(OpsError):
     """Raised when the Atlas API cannot complete an operation."""

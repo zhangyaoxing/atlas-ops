@@ -1447,12 +1447,25 @@ class FakeAppServicesClient:
         self.trigger_calls: list[tuple[str, str]] = []
         self.function_list_calls: list[tuple[str, str]] = []
         self.function_get_calls: list[tuple[str, str, str]] = []
+        self.function_create_calls: list[dict[str, Any]] = []
+        self.function_delete_calls: list[dict[str, Any]] = []
+        self.trigger_create_calls: list[dict[str, Any]] = []
+        self.trigger_update_calls: list[dict[str, Any]] = []
+        self.trigger_delete_calls: list[dict[str, Any]] = []
+        self.requests: list[dict[str, Any]] = []
         self.apps = SimpleNamespace(admin_list_applications=self._list_apps)
         self.services = SimpleNamespace(admin_list_services=self._list_services)
-        self.triggers = SimpleNamespace(admin_list_triggers=self._list_triggers)
+        self.triggers = SimpleNamespace(
+            admin_list_triggers=self._list_triggers,
+            admin_create_trigger=self._create_trigger,
+            admin_update_trigger=self._update_trigger,
+            admin_delete_trigger=self._delete_trigger,
+        )
         self.functions = SimpleNamespace(
             admin_list_functions=self._list_functions,
             admin_get_function=self._get_function,
+            admin_create_function=self._create_function,
+            admin_delete_function=self._delete_function,
         )
 
     def _list_apps(self, group_id: str, *, product: str | None = None) -> list[Any]:
@@ -1474,6 +1487,27 @@ class FakeAppServicesClient:
     def _get_function(self, app_id: str, function_id: str, group_id: str) -> Any:
         self.function_get_calls.append((app_id, function_id, group_id))
         return self._function_definitions[function_id]
+
+    def _create_function(self, **kwargs: Any) -> Any:
+        self.function_create_calls.append(kwargs)
+        return {"_id": "fn-created", "name": kwargs["body"]["name"]}
+
+    def _delete_function(self, **kwargs: Any) -> None:
+        self.function_delete_calls.append(kwargs)
+
+    def _create_trigger(self, **kwargs: Any) -> Any:
+        self.trigger_create_calls.append(kwargs)
+        return SimpleNamespace(id="trigger-created")
+
+    def _update_trigger(self, **kwargs: Any) -> None:
+        self.trigger_update_calls.append(kwargs)
+
+    def _delete_trigger(self, **kwargs: Any) -> None:
+        self.trigger_delete_calls.append(kwargs)
+
+    def request(self, method: str, path: str, **kwargs: Any) -> Any:
+        self.requests.append({"method": method, "path": path, **kwargs})
+        return None
 
     def __enter__(self) -> FakeAppServicesClient:
         return self
@@ -1588,11 +1622,18 @@ def test_trigger_exports_definitions(tmp_path: Path, monkeypatch: pytest.MonkeyP
     assert "Exported 1 trigger(s) in 1 file(s) across 1 app(s)" in result.output
 
 
-def test_trigger_requires_export(tmp_path: Path) -> None:
+def test_trigger_sync_requires_definitions(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    called: list[bool] = []
+    monkeypatch.setattr(
+        "atlas_ops.cli.client_from_env",
+        lambda: called.append(True) or pytest.fail("Atlas client must not be created"),
+    )
+
     result = runner.invoke(app, ["trigger", str(tmp_path), "-g", GROUP_A.id])
 
     assert result.exit_code == 1
-    assert "only --export/-e" in result.output
+    assert "No .json files found" in result.output
+    assert called == []
 
 
 def test_trigger_reports_missing_credentials(
@@ -1798,3 +1839,134 @@ def test_summary_zero_counts_are_not_colored() -> None:
     assert "\x1b[32m" not in search_table
     assert "\x1b[31m" not in search_table
     assert "\x1b[33m2\x1b[0m" in search_table
+
+
+def test_trigger_sync_creates_function_then_trigger(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "on-insert.json").write_text(
+        json.dumps(
+            {
+                "database": "db",
+                "collection": "coll",
+                "trigger": {
+                    "name": "on-insert",
+                    "type": "DATABASE",
+                    "disabled": False,
+                    "config": {
+                        "database": "db",
+                        "collection": "coll",
+                        "operation_types": ["INSERT"],
+                    },
+                },
+                "function": {
+                    "private": True,
+                    "source": "exports = function() { return 1; };",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail())
+    _patch_client(monkeypatch, client)
+    app_client = FakeAppServicesClient(
+        {
+            None: [SimpleNamespace(id="app-triggers", name="Triggers")],
+            "atlas": [],
+        },
+        {
+            "app-triggers": [
+                {
+                    "_id": "svc-1",
+                    "name": "cluster0",
+                    "type": "mongodb-atlas",
+                }
+            ]
+        },
+        {"app-triggers": []},
+    )
+    monkeypatch.setattr("atlas_ops.cli.app_services_client_from_env", lambda: app_client)
+
+    result = runner.invoke(
+        app,
+        [
+            "trigger",
+            str(tmp_path),
+            "-g",
+            GROUP_A.id,
+            "-c",
+            "cluster0",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Trigger change preview" in result.output
+    assert re.search(
+        r"^\| on-insert \\| DATABASE \\| create \\|$",
+        result.output,
+        re.MULTILINE,
+    )
+    function_body = app_client.function_create_calls[0]["body"]
+    assert function_body["name"] == "Atlas_Triggers_on-insert"
+    assert function_body["source"] == "exports = function() { return 1; };"
+    trigger_body = app_client.trigger_create_calls[0]["body"]
+    assert trigger_body["name"] == "on-insert"
+    assert trigger_body["function_id"] == "fn-created"
+    assert trigger_body["config"]["service_id"] == "svc-1"
+    assert trigger_body["config"]["database"] == "db"
+    assert trigger_body["config"]["collection"] == "coll"
+    assert "Trigger sync complete: 1 created, 0 updated, 0 skipped, 0 deleted" in result.output
+    assert client.created_user_payload is None
+
+
+def test_trigger_sync_aborts_when_preview_declined(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "on-insert.json").write_text(
+        json.dumps(
+            {
+                "database": "db",
+                "collection": "coll",
+                "trigger": {
+                    "name": "on-insert",
+                    "type": "DATABASE",
+                    "config": {"database": "db", "collection": "coll"},
+                },
+                "function": {
+                    "private": True,
+                    "source": "exports = function() {};",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail())
+    _patch_client(monkeypatch, client)
+    app_client = FakeAppServicesClient(
+        {
+            None: [SimpleNamespace(id="app-triggers", name="Triggers")],
+            "atlas": [],
+        },
+        {"app-triggers": [{"_id": "svc-1", "name": "cluster0", "type": "mongodb-atlas"}]},
+        {"app-triggers": []},
+    )
+    monkeypatch.setattr("atlas_ops.cli.app_services_client_from_env", lambda: app_client)
+    monkeypatch.setattr("atlas_ops.cli._confirm_changes", lambda: False)
+
+    result = runner.invoke(
+        app,
+        [
+            "trigger",
+            str(tmp_path),
+            "-g",
+            GROUP_A.id,
+            "-c",
+            "cluster0",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "Trigger change preview" in result.output
+    assert "Aborted." in result.output
+    assert app_client.trigger_create_calls == []
+    assert app_client.function_create_calls == []

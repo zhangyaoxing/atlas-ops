@@ -81,7 +81,19 @@ from atlas_ops.search.plan import (
     plan_search_indexes,
 )
 from atlas_ops.search.remote import fetch_search_indexes
+from atlas_ops.trigger.definitions import (
+    TriggerSpec,
+    load_trigger_definitions,
+)
 from atlas_ops.trigger.export import TriggerExportResult, export_triggers
+from atlas_ops.trigger.sync import (
+    TriggerAction,
+    TriggerPlan,
+    TriggerSyncResult,
+    apply_trigger_sync,
+    find_triggers_app,
+    plan_trigger_sync,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -468,7 +480,10 @@ def trigger(
         dir_okay=True,
         readable=True,
         resolve_path=True,
-        help="Directory for exported trigger JSON files.",
+        help=(
+            "Directory with trigger definition JSON files, or the export "
+            "destination when --export is used."
+        ),
     ),
     project: str | None = typer.Option(
         None,
@@ -489,22 +504,29 @@ def trigger(
         False,
         "--export",
         "-e",
-        help="Export all App Services trigger definitions to DIRECTORY.",
+        help="Export App Services triggers to DIRECTORY instead of syncing definitions.",
     ),
 ) -> None:
-    """Export App Services trigger definitions for one cluster.
+    """Synchronize or export App Services triggers for one cluster.
 
-    Uses the App Services Admin API client and only needs Atlas API
-    credentials, the project ID, and the cluster. Triggers are filtered to
-    database triggers on data sources linked to that cluster and grouped by
-    database collection. No MongoDB connection or temporary database user is
-    involved.
+    By default, local trigger files are matched by trigger name in the target
+    project's ``Triggers`` app. Missing triggers are created after creating their
+    function, existing triggers are updated from the remote template, and remote
+    triggers missing locally are deleted together with their orphaned function.
+    With ``--export``, definitions are written instead.
+
+    Uses the App Services Admin API client and only needs Atlas API credentials,
+    the project ID, and the cluster. No MongoDB connection or temporary database
+    user is involved.
     """
+    definitions: list[TriggerSpec] | None = None
     target: ClusterTarget | None = None
-    result: TriggerExportResult | None = None
+    export_result: TriggerExportResult | None = None
+    sync_plan: TriggerPlan | None = None
+    sync_result: TriggerSyncResult | None = None
     try:
         if not export:
-            raise AtlasOperationError("The trigger command currently supports only --export/-e.")
+            definitions = load_trigger_definitions(directory)
         with client_from_env() as client:
             project_id, cluster_ref = _resolve_references(project, cluster)
             target_project = get_project(client, project_id)
@@ -514,20 +536,56 @@ def trigger(
             target = matches[0] if len(matches) == 1 else _choose_cluster(matches)
             _log_found_cluster(target, cluster_ref)
         with app_services_client_from_env() as app_client:
-            logger.info("Exporting trigger definitions to %s...", directory)
-            result = export_triggers(
-                app_client,
-                project_id,
-                target.cluster_name,
-                target.cluster_id,
-                directory,
-            )
-            logger.info(
-                "Exported %d trigger(s) in %d file(s) across %d app(s).",
-                result.triggers,
-                result.files,
-                result.apps,
-            )
+            if export:
+                logger.info("Exporting trigger definitions to %s...", directory)
+                export_result = export_triggers(
+                    app_client,
+                    project_id,
+                    target.cluster_name,
+                    target.cluster_id,
+                    directory,
+                )
+                logger.info(
+                    "Exported %d trigger(s) in %d file(s) across %d app(s).",
+                    export_result.triggers,
+                    export_result.files,
+                    export_result.apps,
+                )
+            else:
+                assert definitions is not None
+                triggers_app = find_triggers_app(app_client, project_id)
+                sync_plan = plan_trigger_sync(
+                    app_client,
+                    triggers_app.id,
+                    project_id,
+                    definitions,
+                    target.cluster_name,
+                    target.cluster_id,
+                )
+                _print_trigger_sync_preview(sync_plan)
+                has_changes = any(
+                    item.action is not TriggerAction.IDENTICAL for item in sync_plan.items
+                )
+                if not has_changes:
+                    typer.echo("No changes to apply.")
+                elif not _confirm_changes():
+                    typer.echo("Aborted.")
+                    raise typer.Exit(code=1)
+                sync_result = apply_trigger_sync(
+                    app_client,
+                    triggers_app.id,
+                    project_id,
+                    sync_plan,
+                    target.cluster_name,
+                )
+                logger.info(
+                    "Trigger sync complete: %d created, %d updated, %d deleted, "
+                    "%d function(s) deleted.",
+                    sync_result.created,
+                    sync_result.updated,
+                    sync_result.deleted,
+                    sync_result.functions_deleted,
+                )
     except OpsError as exc:
         _fail(str(exc))
     except (AtlasAdminApiError, AtlasAppApiError) as exc:
@@ -538,8 +596,13 @@ def trigger(
         _fail(f"Could not reach the Atlas API: {exc}")
 
     assert target is not None
-    assert result is not None
-    _print_trigger_export_summary(directory, target, result)
+    if export:
+        assert export_result is not None
+        _print_trigger_export_summary(directory, target, export_result)
+    else:
+        assert sync_plan is not None
+        assert sync_result is not None
+        _print_trigger_sync_summary(target, directory, sync_plan, sync_result)
 
 
 def _resolve_project(project: str | None) -> str:
@@ -914,12 +977,12 @@ def _format_export_table(
 def _format_markdown_table(
     headers: Sequence[str],
     rows: Sequence[tuple[object, ...]],
-    total: Sequence[object],
+    total: Sequence[object] | None = None,
     *,
     numeric_columns: set[int],
     colors: dict[int, str] | None = None,
 ) -> str:
-    table_rows = [headers, *rows, total]
+    table_rows = [headers, *rows, *([total] if total is not None else [])]
     widths = [max(len(str(row[index])) for row in table_rows) for index in range(len(headers))]
 
     def render(cells: Sequence[object], *, colorize: bool = False) -> str:
@@ -943,7 +1006,8 @@ def _format_markdown_table(
     ]
     lines = [render(headers), f"| {' | '.join(separators)} |"]
     lines.extend(render(row, colorize=True) for row in rows)
-    lines.append(render(total, colorize=True))
+    if total is not None:
+        lines.append(render(total, colorize=True))
     return "\n".join(lines)
 
 
@@ -1093,6 +1157,59 @@ def _print_search_export_summary(
     typer.echo(
         f"Exported {result.indexes} search index(es) from {result.files} "
         f"collection(s) to {directory}."
+    )
+
+
+def _trigger_plan_rows(plan: TriggerPlan) -> list[tuple[str, str, str]]:
+    order = {
+        TriggerAction.CREATE: 0,
+        TriggerAction.UPDATE: 1,
+        TriggerAction.DELETE: 2,
+        TriggerAction.IDENTICAL: 3,
+    }
+    items = sorted(
+        plan.items,
+        key=lambda item: (order[item.action], item.name),
+    )
+    return [(item.name, item.trigger_type, item.action.value) for item in items]
+
+
+def _format_trigger_plan_table(rows: Sequence[tuple[str, str, str]]) -> str:
+    return _format_markdown_table(
+        ("Trigger", "Type", "Action"),
+        rows,
+        numeric_columns=set(),
+    )
+
+
+def _print_trigger_sync_preview(plan: TriggerPlan) -> None:
+    rows = _trigger_plan_rows(plan)
+    typer.echo("")
+    typer.echo(f"Trigger change preview ({len(rows)} trigger(s)):")
+    typer.echo("")
+    typer.echo(_format_trigger_plan_table(rows))
+    typer.echo("")
+
+
+def _print_trigger_sync_summary(
+    target: ClusterTarget,
+    directory: Path,
+    plan: TriggerPlan,
+    result: TriggerSyncResult,
+) -> None:
+    rows = _trigger_plan_rows(plan)
+    typer.echo("")
+    typer.echo(f"Cluster:    {target.cluster_name} ({target.cluster_id or 'unknown ID'})")
+    typer.echo(f"Project:    {target.project_name} ({target.project_id})")
+    typer.echo("")
+    typer.echo(f"Trigger sync summary ({len(rows)} trigger(s) from {directory}):")
+    typer.echo("")
+    typer.echo(_format_trigger_plan_table(rows))
+    typer.echo("")
+    typer.echo(
+        f"Trigger sync complete: {result.created} created, {result.updated} updated, "
+        f"{result.skipped} skipped, {result.deleted} deleted; "
+        f"{result.functions_deleted} orphan function(s) deleted."
     )
 
 
