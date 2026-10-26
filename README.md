@@ -541,15 +541,9 @@ source .venv/bin/activate
 
 ## Dependencies
 
-`pyatlassdk` points to a local checkout in editable mode through
-`[tool.uv.sources]`:
-
-```toml
-pyatlassdk = { path = "../mongo-atlas-sdk/pyatlassdk", editable = true }
-```
-
-Adjust this line if your repository layout differs. Once the SDK is published to
-PyPI, this can be replaced with a version constraint.
+`pyatlassdk` is installed from PyPI (`pyatlassdk>=0.1.0`), so no local checkout or
+`[tool.uv.sources]` override is required. `uv sync` installs it together with the
+other dependencies.
 
 ## Adding a new command
 
