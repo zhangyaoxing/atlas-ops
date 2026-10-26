@@ -1206,7 +1206,7 @@ def test_index_rejects_missing_directory(tmp_path: Path) -> None:
     )
 
     assert result.exit_code == 2
-    assert "does not exist" in result.output
+    assert "not exist" in result.output
 
 
 class _CaptureHandler(logging.Handler):
