@@ -232,7 +232,11 @@ def _search_sync_rows(
         else:
             counts[key][2] += 1
     for extra in deleted_extras:
-        counts[(extra.database, extra.collection)][3] += 1
+        key = (extra.database, extra.collection)
+        if key not in counts:
+            counts[key] = [0, 0, 0, 0]
+            order.append(key)
+        counts[key][3] += 1
 
     rows: list[tuple[str, int, int, int, int]] = []
     for database, collection in order:
@@ -325,3 +329,5 @@ def _print_search_export_summary(
         f"Exported {result.indexes} search index(es) from {result.files} "
         f"collection(s) to {directory}."
     )
+    if result.removed:
+        typer.echo(f"Removed {result.removed} stale file(s) from {directory}.")

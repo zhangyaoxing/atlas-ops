@@ -8,7 +8,9 @@ from enum import Enum
 from typing import Any
 
 from atlas_ops.index.definitions import CollectionIndexes, IndexSpec
-from atlas_ops.index.mongo import MissingNamespace, MongoCommandClient
+from atlas_ops.index.mongo import MissingNamespace, MongoReadClient
+
+_SYSTEM_DATABASES = {"admin", "local", "config"}
 
 
 class IndexAction(str, Enum):
@@ -50,9 +52,11 @@ class IndexPlan:
 
 
 def plan_indexes(
-    client: MongoCommandClient,
+    client: MongoReadClient,
     definitions: list[CollectionIndexes],
     missing: list[MissingNamespace],
+    *,
+    include_unmanaged: bool = False,
 ) -> IndexPlan:
     """Classify declared indexes and collect existing indexes that are extra.
 
@@ -100,6 +104,40 @@ def plan_indexes(
                     keys=dict(index_key),
                 )
             )
+
+    if include_unmanaged:
+        declared_namespaces = set(specs_by_namespace)
+        for database in sorted(client.list_database_names()):
+            if database in _SYSTEM_DATABASES:
+                continue
+            database_handle = client[database]
+            collections = sorted(
+                database_handle.list_collections(),
+                key=lambda item: item.get("name", ""),
+            )
+            for collection_info in collections:
+                collection = collection_info.get("name")
+                if (
+                    not collection
+                    or collection.startswith("system.")
+                    or collection_info.get("type") == "view"
+                    or (database, collection) in declared_namespaces
+                ):
+                    continue
+                for index in database_handle[collection].list_indexes():
+                    name = str(index.get("name") or "")
+                    index_key = index.get("key") or {}
+                    pattern = tuple(index_key.items())
+                    if not name or name == "_id_" or pattern == (("_id", 1),):
+                        continue
+                    extras.append(
+                        ExtraIndex(
+                            database=database,
+                            collection=collection,
+                            name=name,
+                            keys=dict(index_key),
+                        )
+                    )
 
     return IndexPlan(items=tuple(items), extras=tuple(extras))
 

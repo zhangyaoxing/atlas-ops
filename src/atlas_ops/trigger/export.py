@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from atlas_ops.errors import TriggerExportError
+from atlas_ops.file_sync import remove_stale_json_files
 from atlas_ops.filenames import json_filename
 
 
@@ -38,6 +39,7 @@ class TriggerExportResult:
     apps: int
     collections: tuple[TriggerCollection, ...]
     scheduled: int = 0
+    removed: int = 0
 
 
 def export_triggers(
@@ -178,6 +180,7 @@ def export_triggers(
         outputs.append((filename, entry))
 
     files = 0
+    written: set[str] = set()
     for filename, entry in outputs:
         document: dict[str, Any] = {}
         if entry["database"] is not None and entry["collection"] is not None:
@@ -191,7 +194,9 @@ def export_triggers(
             encoding="utf-8",
         )
         files += 1
+        written.add(filename)
 
+    removed = remove_stale_json_files(directory, written)
     exported = [
         TriggerCollection(database=database, collection=collection, triggers=count)
         for (database, collection), count in sorted(collection_counts.items())
@@ -202,6 +207,7 @@ def export_triggers(
         apps=len(apps_with_triggers),
         collections=tuple(exported),
         scheduled=scheduled,
+        removed=len(removed),
     )
 
 

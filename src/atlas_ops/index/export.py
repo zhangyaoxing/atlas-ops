@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from atlas_ops.file_sync import remove_stale_json_files
 from atlas_ops.filenames import json_filename
 from atlas_ops.index.mongo import MongoReadClient
 
@@ -30,6 +31,7 @@ class ExportResult:
     files: int
     indexes: int
     collections: tuple[ExportedCollection, ...]
+    removed: int = 0
 
 
 def export_indexes(client: MongoReadClient, directory: Path) -> ExportResult:
@@ -43,6 +45,7 @@ def export_indexes(client: MongoReadClient, directory: Path) -> ExportResult:
     files = 0
     indexes = 0
     exported: list[ExportedCollection] = []
+    written: set[str] = set()
 
     for database in sorted(client.list_database_names()):
         if database in _SYSTEM_DATABASES:
@@ -74,6 +77,7 @@ def export_indexes(client: MongoReadClient, directory: Path) -> ExportResult:
             )
             files += 1
             indexes += len(definitions)
+            written.add(path.name)
             exported.append(
                 ExportedCollection(
                     database=database,
@@ -82,10 +86,12 @@ def export_indexes(client: MongoReadClient, directory: Path) -> ExportResult:
                 )
             )
 
+    removed = remove_stale_json_files(directory, written)
     return ExportResult(
         files=files,
         indexes=indexes,
         collections=tuple(exported),
+        removed=len(removed),
     )
 
 

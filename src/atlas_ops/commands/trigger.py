@@ -259,3 +259,5 @@ def _print_trigger_export_summary(
         f"Exported {result.triggers} trigger(s) in {result.files} file(s) "
         f"across {result.apps} app(s) to {directory}."
     )
+    if result.removed:
+        typer.echo(f"Removed {result.removed} stale file(s) from {directory}.")

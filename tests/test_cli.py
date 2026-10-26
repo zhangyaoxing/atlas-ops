@@ -20,11 +20,16 @@ from atlas_ops import __version__
 from atlas_ops.atlas import ClusterTarget
 from atlas_ops.cli import app
 from atlas_ops.commands.index import _format_index_table
-from atlas_ops.commands.search import _format_search_sync_table
+from atlas_ops.commands.search import (
+    _format_search_sync_table,
+    _search_sync_rows,
+)
 from atlas_ops.commands.trigger import (
     _format_trigger_plan_table,
     _trigger_plan_rows,
 )
+from atlas_ops.search.definitions import SearchCollectionIndexes, SearchIndexSpec
+from atlas_ops.search.plan import SearchExtra, SearchPlan
 from atlas_ops.trigger.sync import TriggerAction, TriggerPlan, TriggerPlanItem
 from atlas_ops.ui import _change_warning, _format_export_table
 
@@ -2168,3 +2173,30 @@ def test_index_reports_unknown_connection_type(
     assert result.exit_code == 1
     assert "Connection type 'missing' not found" in result.output
     assert "standard" in result.output
+
+
+def test_search_sync_rows_include_unmanaged_remote_collections() -> None:
+    definitions = [
+        SearchCollectionIndexes(
+            path=Path("search.json"),
+            database="db",
+            collection="coll",
+            indexes=(SearchIndexSpec(name="local", type="search", definition={}),),
+        )
+    ]
+    plan = SearchPlan(
+        items=(),
+        extras=(
+            SearchExtra(
+                database="other",
+                collection="events",
+                name="remote",
+                index_id="id-remote",
+            ),
+        ),
+    )
+
+    assert _search_sync_rows(definitions, plan, plan.extras) == [
+        ("other.events", 0, 0, 0, 1),
+        ("db.coll", 0, 0, 0, 0),
+    ]

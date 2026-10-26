@@ -133,6 +133,23 @@ def plan_search_indexes(
                     )
                 )
 
+    local_namespaces = {(definition.database, definition.collection) for definition in definitions}
+    for (database, collection), remote_indexes in remote_by_namespace.items():
+        if (database, collection) in local_namespaces:
+            continue
+        for remote in remote_indexes:
+            name = remote.get("name")
+            index_id = remote.get("indexID")
+            if isinstance(name, str) and name and isinstance(index_id, str) and index_id:
+                extras.append(
+                    SearchExtra(
+                        database=database,
+                        collection=collection,
+                        name=name,
+                        index_id=index_id,
+                    )
+                )
+
     return SearchPlan(items=tuple(items), extras=tuple(extras))
 
 

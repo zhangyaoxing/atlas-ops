@@ -57,13 +57,15 @@ also skip `.env` entirely and export the variables directly.
 Read every JSON file in a directory (one file per collection), locate the cluster by
 ID or name within the specified project, and select one of its connection strings.
 
-The default mode creates missing indexes for the collections in the definitions,
-finds existing indexes in those collections that are not present in the definitions,
-and then prints a change preview table. It asks once whether to proceed; confirmed
+The default mode creates missing indexes for the collections in the definitions
+and treats the local files as the source of truth: indexes in any non-system
+collection that are not declared in the local files are also planned for deletion.
+It prints a change preview table and asks once whether to proceed; confirmed
 deletions run after index creation, with no separate deletion prompt. With
 `--export/-e`, `DIRECTORY` becomes an output directory: definitions are not read, no
-index is created or deleted, and the index definitions of every collection in all
-non-system databases are exported as JSON files.
+index is created, and every non-system collection's indexes are exported. Local
+`*.json` files that the export did not produce are removed so the directory mirrors
+the cluster.
 
 ```bash
 # Project ID + cluster name
@@ -178,9 +180,10 @@ Execution flow:
    - `options` match exactly → log one INFO and skip
    - `options` differ → log a WARNING (with the existing name and both option sets)
      and skip
-10. Find existing indexes in the defined collections that are not present in the
-    definitions (again by `keys`; `_id_` is always excluded) and include them as
-    planned deletions
+10. Find existing indexes in all non-system collections that are not present in
+    the local definitions (again by `keys`; `_id_` is always excluded). Collections
+    without a local JSON file are treated as fully undeclared, so their indexes are
+    included as planned deletions
 11. Print a preview table of planned Created / Skipped / Deleted counts and ask
     `Proceed with these changes?` (default: no); declining aborts before any change
 12. Run `createIndexes` for indexes that need creating, grouped by
@@ -290,7 +293,7 @@ The default mode compares each local definition with the remote cluster:
 - missing index → create
 - changed `definition` or `type` → update
 - identical → skip
-- remote index in a defined collection but absent locally → planned deletion
+- remote index anywhere in the cluster but absent locally → planned deletion
 
 The command uses the Atlas Admin API cluster-wide Search index endpoint, so it does
 not connect to MongoDB or create a temporary database user.
@@ -344,8 +347,8 @@ Sync behavior:
 
 - Fetches all remote indexes for the cluster and compares them by
   `(database, collection, name)`
-- Detects remote indexes in collections that have local definitions but are not
-  present locally and includes them as planned deletions
+- Detects remote indexes that are not present in any local definition, including
+  whole collections without a local file, and includes them as planned deletions
 - Prints a change preview table and asks `Proceed with these changes?` (default: no);
   declining aborts before any create, update, or delete
 - After approval, creates or updates declared indexes through the Atlas SDK and
@@ -395,7 +398,7 @@ change counts first.
   `statusDetail`, and `latestDefinitionVersion`
 - Supports both `search` and `vectorSearch` definitions
 - Writes `<database>.<collection>.json`; collections without Search indexes produce
-  no file
+  no file, and local `*.json` files not produced by the export are removed
 - Exported files can be edited and synced back with the default mode
 - The run ends with an export summary table:
 
@@ -547,7 +550,8 @@ must be unique because the name is also the filename and sync key.
 
 #### Trigger export mode
 
-`--export` writes one file per trigger using the format above. It:
+`--export` writes one file per trigger using the format above and removes local
+`*.json` files not produced by the export. It:
 
 - Scans standard apps and the special `atlas` product app
 - Keeps `DATABASE` triggers linked to the target cluster and all `SCHEDULED`

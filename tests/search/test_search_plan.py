@@ -85,16 +85,29 @@ def test_plan_reports_remote_indexes_not_in_local_definitions() -> None:
 
     assert plan.extras == (
         SearchExtra(database="db", collection="coll", name="old", index_id="id-old"),
+        SearchExtra(
+            database="other",
+            collection="coll",
+            name="other",
+            index_id="id-other",
+        ),
     )
 
 
-def test_plan_ignores_remote_namespaces_without_definitions() -> None:
+def test_plan_includes_remote_namespaces_without_definitions() -> None:
     plan = plan_search_indexes(
-        [_remote("old", {}, database="other")],
+        [_remote("old", {}, database="other", index_id="id-old")],
         [_definition(SearchIndexSpec(name="local", type="search", definition={}))],
     )
 
-    assert plan.extras == ()
+    assert plan.extras == (
+        SearchExtra(
+            database="other",
+            collection="coll",
+            name="old",
+            index_id="id-old",
+        ),
+    )
 
 
 def test_plan_updates_when_type_differs() -> None:

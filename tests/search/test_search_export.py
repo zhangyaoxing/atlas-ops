@@ -185,3 +185,27 @@ def test_export_falls_back_to_definition_and_default_type(tmp_path: Path) -> Non
             "definition": {"mappings": {"dynamic": True}},
         }
     ]
+
+
+def test_export_removes_stale_local_json(tmp_path: Path) -> None:
+    stale = tmp_path / "stale.json"
+    stale.write_text("{}", encoding="utf-8")
+    keep = tmp_path / "notes.txt"
+    keep.write_text("keep", encoding="utf-8")
+    client = FakeClient(
+        [
+            {
+                "database": "db",
+                "collectionName": "coll",
+                "name": "default",
+                "type": "search",
+                "latestDefinition": {"mappings": {"dynamic": True}},
+            }
+        ]
+    )
+
+    result = export_search_indexes(client, "project-1", "cluster0", tmp_path)
+
+    assert result.removed == 1
+    assert not stale.exists()
+    assert keep.exists()

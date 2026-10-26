@@ -489,3 +489,34 @@ def test_export_includes_scheduled_triggers(tmp_path: Path) -> None:
         "private": True,
         "source": "exports = function() { return true; };",
     }
+
+
+def test_export_removes_stale_local_json(tmp_path: Path) -> None:
+    stale = tmp_path / "stale.json"
+    stale.write_text("{}", encoding="utf-8")
+    keep = tmp_path / "notes.txt"
+    keep.write_text("keep", encoding="utf-8")
+    client = FakeClient(
+        {None: [SimpleNamespace(id="app-1", name="my-app")]},
+        {"app-1": [{"_id": "svc-1", "name": "cluster0", "type": "mongodb-atlas"}]},
+        {
+            "app-1": [
+                {
+                    "_id": "trigger-1",
+                    "name": "on-insert",
+                    "type": "DATABASE",
+                    "config": {
+                        "service_id": "svc-1",
+                        "database": "db",
+                        "collection": "coll",
+                    },
+                }
+            ]
+        },
+    )
+
+    result = export_triggers(client, "project-1", "cluster0", "", tmp_path)
+
+    assert result.removed == 1
+    assert not stale.exists()
+    assert keep.exists()

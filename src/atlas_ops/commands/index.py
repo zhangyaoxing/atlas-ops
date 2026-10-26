@@ -238,7 +238,12 @@ def index(
                             ):
                                 typer.echo("Aborted.")
                                 raise typer.Exit(code=1)
-                        plan = plan_indexes(mongo_client, definitions, missing)
+                        plan = plan_indexes(
+                            mongo_client,
+                            definitions,
+                            missing,
+                            include_unmanaged=True,
+                        )
                         _log_index_plan(plan.items)
                         _print_index_preview(directory, definitions, plan)
                         has_changes = bool(plan.extras) or any(
@@ -529,6 +534,8 @@ def _print_export_summary(
     typer.echo(
         f"Exported {result.indexes} index(es) from {result.files} collection(s) to {directory}."
     )
+    if result.removed:
+        typer.echo(f"Removed {result.removed} stale file(s) from {directory}.")
 
 
 def _format_utc(value: datetime) -> str:

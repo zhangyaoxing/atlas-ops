@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from atlas_ops.atlas import AtlasRequestClient
+from atlas_ops.file_sync import remove_stale_json_files
 from atlas_ops.filenames import json_filename
 from atlas_ops.search.remote import fetch_search_indexes
 
@@ -28,6 +29,7 @@ class SearchExportResult:
     files: int
     indexes: int
     collections: tuple[SearchCollection, ...]
+    removed: int = 0
 
 
 def export_search_indexes(
@@ -65,6 +67,7 @@ def export_search_indexes(
     files = 0
     indexes = 0
     exported: list[SearchCollection] = []
+    written: set[str] = set()
     for database, collection in sorted(grouped):
         definitions = grouped[(database, collection)]
         definitions.sort(key=lambda item: str(item.get("name") or ""))
@@ -83,6 +86,7 @@ def export_search_indexes(
         )
         files += 1
         indexes += len(definitions)
+        written.add(file_path.name)
         exported.append(
             SearchCollection(
                 database=database,
@@ -91,10 +95,12 @@ def export_search_indexes(
             )
         )
 
+    removed = remove_stale_json_files(directory, written)
     return SearchExportResult(
         files=files,
         indexes=indexes,
         collections=tuple(exported),
+        removed=len(removed),
     )
 
 

@@ -144,3 +144,19 @@ def test_exported_files_round_trip_through_loader(tmp_path: Path) -> None:
         "name": "email_1",
         "unique": True,
     }
+
+
+def test_export_removes_stale_local_json(tmp_path: Path) -> None:
+    stale = tmp_path / "stale.json"
+    stale.write_text("{}", encoding="utf-8")
+    keep = tmp_path / "notes.txt"
+    keep.write_text("keep", encoding="utf-8")
+    client = FakeClient(
+        {"db": {"users": {"indexes": [{"v": 2, "key": {"field": 1}, "name": "field_1"}]}}}
+    )
+
+    result = export_indexes(client, tmp_path)
+
+    assert result.removed == 1
+    assert not stale.exists()
+    assert keep.exists()

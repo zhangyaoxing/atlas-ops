@@ -23,6 +23,9 @@ class FakeDatabase:
     def __getitem__(self, collection: str) -> FakeCollection:
         return FakeCollection(self._collections.get(collection, []))
 
+    def list_collections(self) -> list[dict[str, Any]]:
+        return [{"name": name, "type": "collection"} for name in self._collections]
+
 
 class FakeClient:
     def __init__(self, databases: dict[str, dict[str, list[dict[str, Any]]]]) -> None:
@@ -31,10 +34,16 @@ class FakeClient:
     def __getitem__(self, name: str) -> FakeDatabase:
         return FakeDatabase(self._databases.get(name, {}))
 
+    def list_database_names(self) -> list[str]:
+        return list(self._databases)
+
 
 class ExplodingClient:
     def __getitem__(self, name: str) -> Any:
         raise AssertionError("indexes must not be listed for missing namespaces")
+
+    def list_database_names(self) -> list[str]:
+        return []
 
 
 def _spec(keys: dict[str, int | float | str], options: dict[str, Any] | None = None) -> IndexSpec:
@@ -236,3 +245,28 @@ def test_missing_namespace_has_no_extra_indexes() -> None:
     plan = plan_indexes(ExplodingClient(), [_definition(_spec({"field": 1}))], missing)
 
     assert plan.extras == ()
+
+
+def test_include_unmanaged_collects_indexes_outside_local_files() -> None:
+    client = FakeClient(
+        {
+            "exampleDB": {"example": [{"v": 2, "key": {"field": 1}, "name": "field_1"}]},
+            "otherDB": {
+                "events": [
+                    {"v": 2, "key": {"_id": 1}, "name": "_id_"},
+                    {"v": 2, "key": {"createdAt": 1}, "name": "createdAt_1"},
+                ]
+            },
+        }
+    )
+
+    plan = plan_indexes(
+        client,
+        [_definition(_spec({"field": 1}))],
+        [],
+        include_unmanaged=True,
+    )
+
+    assert [(item.database, item.collection, item.name) for item in plan.extras] == [
+        ("otherDB", "events", "createdAt_1")
+    ]
