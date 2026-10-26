@@ -930,7 +930,8 @@ def _format_markdown_table(
             text = str(value)
             if index in numeric_columns:
                 padding = " " * (widths[index] - len(text))
-                if colorize and colors and index in colors:
+                nonzero = text.replace("*", "").strip() != "0"
+                if colorize and colors and index in colors and nonzero:
                     rendered.append(padding + typer.style(text, fg=colors[index]))
                 else:
                     rendered.append(padding + text)

@@ -1796,3 +1796,13 @@ def test_summary_numbers_use_change_colors() -> None:
     assert "\x1b[33m2\x1b[0m" in search_table
     assert "\x1b[31m4\x1b[0m" in search_table
     assert "\x1b[33mUpdated" not in search_table
+
+
+def test_summary_zero_counts_are_not_colored() -> None:
+    index_table = _format_index_table([("exampleDB.example", 0, 0, 0)])
+    assert "\x1b[" not in index_table
+
+    search_table = _format_search_sync_table([("exampleDB.example", 0, 2, 0, 0)])
+    assert "\x1b[32m" not in search_table
+    assert "\x1b[31m" not in search_table
+    assert "\x1b[33m2\x1b[0m" in search_table
