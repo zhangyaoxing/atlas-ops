@@ -124,9 +124,9 @@ def _change_warning(target: ClusterTarget, resource: str) -> str:
     return (
         yellow(f"Heads up! {resource} in ")
         + green(org)
-        + yellow(" - ")
+        + yellow(" → ")
         + green(target.project_name)
-        + yellow(" - ")
+        + yellow(" → ")
         + green(target.cluster_name)
         + yellow(" will be changed!")
     )

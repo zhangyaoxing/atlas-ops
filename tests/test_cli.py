@@ -2059,6 +2059,7 @@ def test_change_warning_colors_names_green() -> None:
 
     assert "Heads up! search indexes in" in warning
     assert "will be changed!" in warning
+    assert " → " in warning
     assert "\x1b[33mHeads up! search indexes in \x1b[0m" in warning
     assert "\x1b[32mOrg A\x1b[0m" in warning
     assert "\x1b[32mProject A\x1b[0m" in warning

@@ -209,7 +209,7 @@ Index change preview (2 collection(s) from /path/to/definitions):
 | exampleDB.two |       0 |       1 |       1 |
 | **Total**     |   **1** |   **2** |   **1** |
 
-Heads up! indexes in <organization> - <project> - <cluster> will be changed!
+Heads up! indexes in <organization> → <project> → <cluster> will be changed!
 Proceed with these changes? [y/N]:
 
 The warning is yellow with the organization, project, and cluster names in green.
@@ -365,7 +365,7 @@ Sync behavior:
   | exampleDB.example |       1 |       1 |       1 |       1 |
   | **Total**         |   **1** |   **1** |   **1** |   **1** |
 
-  Heads up! search indexes in <organization> - <project> - <cluster> will be changed!
+  Heads up! search indexes in <organization> → <project> → <cluster> will be changed!
   Proceed with these changes? [y/N]:
   ```
 
@@ -484,7 +484,7 @@ Trigger change preview (3 trigger(s)):
 Before the prompt, a warning is printed:
 
 ```text
-Heads up! triggers in <organization> - <project> - <cluster> will be changed!
+Heads up! triggers in <organization> → <project> → <cluster> will be changed!
 ```
 
 The warning is yellow with the organization, project, and cluster names in green.
