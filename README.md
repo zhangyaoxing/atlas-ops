@@ -86,6 +86,11 @@ uv run atlas-ops index ./examples/indexes \
   --project-id 64f1a2b3c4d5e6f7a8b9c0d1 --cluster cluster0 \
   --db-username appUser --db-password '...'
 
+# Select a connection type without the interactive prompt
+uv run atlas-ops index ./examples/indexes \
+  --project-id 64f1a2b3c4d5e6f7a8b9c0d1 --cluster cluster0 \
+  --connection-type standard_srv
+
 # Export every collection's index definitions to a directory (no create/delete)
 uv run atlas-ops index ./exported-indexes \
   --project-id 64f1a2b3c4d5e6f7a8b9c0d1 --cluster cluster0 --export
@@ -102,6 +107,9 @@ Options:
   `ATLAS_PROJECT_ID`, then prompts
 - `-c, --cluster`: cluster ID or name; falls back to `ATLAS_CLUSTER_NAME`, then prompts
 - `-e, --export`: export mode; does not create or delete any index
+- `-t, --connection-type`: select a connection string type without prompting; falls
+  back to `ATLAS_CONN_TYPE`. Examples: `standard`, `standard_srv`, `private`,
+  `private_srv`, `private_endpoint`
 - `-u, --db-username` / `-p, --db-password`: existing database user; can also use
   `ATLAS_DB_USERNAME` / `ATLAS_DB_PASSWORD`. Both must be provided together. When
   supplied, no temporary user is created or deleted
@@ -153,8 +161,9 @@ Execution flow:
    it up by ID or name in the project, and prompt when multiple clusters share a name
 5. Fetch cluster details and list all connection strings (strings, lists, and
    dictionaries are expanded into separate options; for example `standard`,
-   `standardSrv`, `private`, `privateSrv`, `awsPrivateLink`, `privateEndpoint`);
-   prompt when there is more than one
+   `standard_srv`, `private`, `private_srv`, `private_endpoint`). If
+   `--connection-type` or `ATLAS_CONN_TYPE` is set, use the first matching type and
+   skip the prompt; otherwise prompt when there is more than one
 6. Database user: if `--db-username` / `--db-password` or the corresponding
    environment variables are provided, use that user; otherwise create a temporary
    user (`readWriteAnyDatabase`, scoped to the current cluster, with

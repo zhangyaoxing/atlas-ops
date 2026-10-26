@@ -180,6 +180,7 @@ def mongo(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     """Replace the MongoDB client with one where exampleDB.example exists."""
     monkeypatch.delenv("ATLAS_DB_USERNAME", raising=False)
     monkeypatch.delenv("ATLAS_DB_PASSWORD", raising=False)
+    monkeypatch.delenv("ATLAS_CONN_TYPE", raising=False)
     client = FakeMongoClient({"exampleDB": ["example"]})
     uris: list[str] = []
 
@@ -273,6 +274,8 @@ def test_index_help_documents_arguments() -> None:
     assert "-p" in result.stdout
     assert "--export" in result.stdout
     assert "-e" in result.stdout
+    assert "--connection-type" in result.stdout
+    assert "-t" in result.stdout
 
 
 def test_index_selects_connection_string(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2055,3 +2058,113 @@ def test_change_warning_colors_names_green() -> None:
     assert "\x1b[32mOrg A\x1b[0m" in warning
     assert "\x1b[32mProject A\x1b[0m" in warning
     assert "\x1b[32mcluster0\x1b[0m" in warning
+
+
+def test_index_selects_connection_type_option(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_definitions(tmp_path)
+    client = FakeAtlasClient(
+        [GROUP_A],
+        {GROUP_A.id: [CLUSTER]},
+        _detail(standard="mongodb://direct", standardSrv="mongodb+srv://srv"),
+    )
+    _patch_client(monkeypatch, client)
+
+    result = runner.invoke(
+        app,
+        [
+            "index",
+            str(tmp_path),
+            "--project-id",
+            GROUP_A.id,
+            "--cluster",
+            "cluster0",
+            "--connection-type",
+            "standard_srv",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert 'Connection: "mongodb+srv://srv"' in result.output
+
+
+def test_index_uses_connection_type_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_definitions(tmp_path)
+    client = FakeAtlasClient(
+        [GROUP_A],
+        {GROUP_A.id: [CLUSTER]},
+        _detail(standard="mongodb://direct", standardSrv="mongodb+srv://srv"),
+    )
+    _patch_client(monkeypatch, client)
+    monkeypatch.setenv("ATLAS_CONN_TYPE", "standard_srv")
+
+    result = runner.invoke(
+        app,
+        ["index", str(tmp_path), "--project-id", GROUP_A.id, "--cluster", "cluster0"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert 'Connection: "mongodb+srv://srv"' in result.output
+
+
+def test_index_connection_type_option_overrides_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_definitions(tmp_path)
+    client = FakeAtlasClient(
+        [GROUP_A],
+        {GROUP_A.id: [CLUSTER]},
+        _detail(standard="mongodb://direct", standardSrv="mongodb+srv://srv"),
+    )
+    _patch_client(monkeypatch, client)
+    monkeypatch.setenv("ATLAS_CONN_TYPE", "standard")
+
+    result = runner.invoke(
+        app,
+        [
+            "index",
+            str(tmp_path),
+            "--project-id",
+            GROUP_A.id,
+            "--cluster",
+            "cluster0",
+            "-t",
+            "standard_srv",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert 'Connection: "mongodb+srv://srv"' in result.output
+
+
+def test_index_reports_unknown_connection_type(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_definitions(tmp_path)
+    client = FakeAtlasClient(
+        [GROUP_A],
+        {GROUP_A.id: [CLUSTER]},
+        _detail(standard="mongodb://direct", standardSrv="mongodb+srv://srv"),
+    )
+    _patch_client(monkeypatch, client)
+
+    result = runner.invoke(
+        app,
+        [
+            "index",
+            str(tmp_path),
+            "--project-id",
+            GROUP_A.id,
+            "--cluster",
+            "cluster0",
+            "-t",
+            "missing",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "Connection type 'missing' not found" in result.output
+    assert "standard" in result.output

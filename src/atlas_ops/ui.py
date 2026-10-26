@@ -10,6 +10,7 @@ import typer
 from rich.markup import escape
 
 from atlas_ops.atlas import ClusterTarget, ConnectionOption, is_object_id
+from atlas_ops.errors import AtlasOperationError
 from atlas_ops.utils import green, red, style_color, yellow
 
 logger = logging.getLogger(__name__)
@@ -49,6 +50,37 @@ def _choose_connection(options: list[ConnectionOption]) -> ConnectionOption:
     if len(options) == 1:
         return options[0]
     return options[_prompt_choice(len(options), f"Select connection string (1-{len(options)})")]
+
+
+def _choose_connection_by_type(
+    options: list[ConnectionOption],
+    connection_type: str,
+) -> ConnectionOption:
+    """Select the first connection string matching a requested type."""
+    requested = connection_type.strip().lower()
+    matches = [option for option in options if option.label.lower() == requested]
+    if not matches:
+        matches = [
+            option
+            for option in options
+            if option.label.lower().startswith(f"{requested}[")
+            or option.label.lower().startswith(f"{requested}.")
+        ]
+    if not matches:
+        available = ", ".join(sorted({option.label for option in options}))
+        raise AtlasOperationError(
+            f"Connection type {connection_type!r} not found. Available: {available}"
+        )
+    if len(matches) > 1:
+        logger.warning(
+            "Multiple connection strings match type [cyan]%s[/cyan]; using the first.",
+            escape(connection_type),
+        )
+    logger.info(
+        "Using connection type [cyan]%s[/cyan] for selection.",
+        escape(connection_type),
+    )
+    return matches[0]
 
 
 def _log_found_cluster(target: ClusterTarget, reference: str) -> None:

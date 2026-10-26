@@ -17,6 +17,7 @@ from rich.markup import escape
 
 from atlas_ops.atlas import (
     CLUSTER_NAME_ENV,
+    CONNECTION_TYPE_ENV,
     DB_PASSWORD_ENV,
     DB_USERNAME_ENV,
     PROJECT_ID_ENV,
@@ -56,6 +57,7 @@ from atlas_ops.references import _resolve_references
 from atlas_ops.ui import (
     _choose_cluster,
     _choose_connection,
+    _choose_connection_by_type,
     _confirm_changes,
     _fail,
     _format_export_table,
@@ -103,6 +105,15 @@ def index(
         "-e",
         help=(
             "Export existing indexes from MongoDB into DIRECTORY instead of applying definitions."
+        ),
+    ),
+    connection_type: str | None = typer.Option(
+        None,
+        "--connection-type",
+        "-t",
+        help=(
+            "Connection type such as standard_srv or private_endpoint. "
+            f"Falls back to {CONNECTION_TYPE_ENV}; skips the prompt."
         ),
     ),
     db_username: str | None = typer.Option(
@@ -166,7 +177,11 @@ def index(
                     f"Cluster {target.cluster_name!r} exposes no connection strings."
                 )
             _log_connection_strings(target.cluster_name, options)
-            selected = _choose_connection(options)
+            requested_type = (connection_type or os.environ.get(CONNECTION_TYPE_ENV, "")).strip()
+            if requested_type:
+                selected = _choose_connection_by_type(options, requested_type)
+            else:
+                selected = _choose_connection(options)
             logger.info(
                 'Selected connection string [cyan]%s[/cyan]: "%s"',
                 escape(selected.label),
