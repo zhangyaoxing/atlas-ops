@@ -6,12 +6,10 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
 
 from atlas_ops.atlas import AtlasRequestClient
 from atlas_ops.filenames import json_filename
-
-_SEARCH_ACCEPT = "application/vnd.atlas.2024-05-30+json"
+from atlas_ops.search.remote import fetch_search_indexes
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,19 +45,9 @@ def export_search_indexes(
     ``latestDefinitionVersion`` are omitted.
     """
     directory.mkdir(parents=True, exist_ok=True)
-    path = (
-        f"/groups/{quote(project_id, safe='')}"
-        f"/clusters/{quote(cluster_name, safe='')}/search/indexes"
-    )
-    payload = client.request(
-        method="GET",
-        path=path,
-        response_model=Any,
-        accept=_SEARCH_ACCEPT,
-    )
 
     grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
-    for item in _results(payload):
+    for item in fetch_search_indexes(client, project_id, cluster_name):
         database = item.get("database")
         collection = item.get("collectionName") or item.get("collection")
         if (
@@ -130,13 +118,3 @@ def _exported_definition(item: dict[str, Any]) -> dict[str, Any] | None:
         "type": index_type,
         "definition": definition,
     }
-
-
-def _results(payload: Any) -> list[dict[str, Any]]:
-    if isinstance(payload, list):
-        return [item for item in payload if isinstance(item, dict)]
-    if isinstance(payload, dict):
-        results = payload.get("results")
-        if isinstance(results, list):
-            return [item for item in results if isinstance(item, dict)]
-    return []

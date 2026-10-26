@@ -19,5 +19,9 @@ class IndexDefinitionError(OpsError):
     """Raised when one or more index definition files are invalid."""
 
 
+class SearchDefinitionError(OpsError):
+    """Raised when one or more search index definition files are invalid."""
+
+
 class AtlasOperationError(OpsError):
     """Raised when the Atlas API cannot complete an operation."""

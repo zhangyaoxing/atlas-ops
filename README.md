@@ -252,74 +252,113 @@ user is created or deleted.
 
 ### `search`
 
-Export Atlas Search indexes for one cluster. The command uses the Atlas Admin API
-cluster-wide Search index endpoint, so it does not connect to MongoDB and does not
-create a temporary database user. Only export mode is implemented so far.
+Synchronize local Atlas Search index definitions to one Atlas cluster. With
+`--export`, write the cluster's search indexes to JSON files instead.
+
+The default mode compares each local definition with the remote cluster:
+
+- missing index → create
+- changed `definition` or `type` → update
+- identical → skip
+- remote index in a defined collection but absent locally → ask whether to delete
+  (default: no)
+
+The command uses the Atlas Admin API cluster-wide Search index endpoint, so it does
+not connect to MongoDB or create a temporary database user.
 
 ```bash
-mkdir -p ./exported-search
+# Sync local definitions to the cluster
+uv run atlas-ops search ./search-indexes \
+  --project-id 64f1a2b3c4d5e6f7a8b9c0d1 --cluster cluster0
+
+# Export remote indexes to a directory
 uv run atlas-ops search ./exported-search \
   --project-id 64f1a2b3c4d5e6f7a8b9c0d1 --cluster cluster0 --export
 ```
 
 Arguments:
 
-- `DIRECTORY`: output directory for search index JSON files (must already exist)
+- `DIRECTORY`: input directory containing `*.json` definitions in the default mode;
+  output directory with `--export` (must already exist)
 
 Options:
 
 - `-g, --project-id`: project ID; falls back to `ATLAS_PROJECT_ID`, then prompts
 - `-c, --cluster`: cluster ID or name; falls back to `ATLAS_CLUSTER_NAME`, then prompts
-- `-e, --export`: export mode; required for now
+- `-e, --export`: export remote indexes instead of syncing definitions
 
-Behavior:
+Local definition format (one file per collection):
 
-- Calls `GET /groups/{groupId}/clusters/{clusterName}/search/indexes` through the
-  Atlas SDK
-- Keeps only the fields needed to create or update an index: `name`, `type`, and
-  `definition` (taken from `latestDefinition`)
+```json
+{
+  "database": "sample_mflix",
+  "collection": "movies",
+  "indexes": [
+    {
+      "name": "default",
+      "type": "search",
+      "definition": {
+        "mappings": { "dynamic": true }
+      }
+    }
+  ]
+}
+```
+
+- `name` is matched within `database.collection`
+- `type` is `search` or `vectorSearch`
+- `definition` contains the user definition (`mappings`, `analyzers`, `synonyms`,
+  `storedSource`, `numPartitions`, etc.)
+- Unknown fields and duplicate names/namespaces are rejected
+
+Sync behavior:
+
+- Fetches all remote indexes for the cluster and compares them by
+  `(database, collection, name)`
+- Creates or updates indexes through the Atlas SDK
+- Detects remote indexes in collections that have local definitions but are not
+  present locally, lists them, and asks once whether to delete them
+- Deletes confirmed extras after creates/updates
+- Leaves remote indexes in collections without local definition files untouched
+- The run ends with a per-collection Markdown table:
+
+  ```text
+  Search sync summary (1 collection(s) from /path/to/search-indexes):
+
+  | Collection        | Created | Updated | Skipped | Deleted |
+  | ----------------- | ------: | ------: | ------: | ------: |
+  | exampleDB.example |       1 |       1 |       1 |       1 |
+  | **Total**         |   **1** |   **1** |   **1** |   **1** |
+
+  Search sync complete: 1 created, 1 updated, 1 skipped, 1 deleted.
+  ```
+
+#### Search export mode
+
+`--export` writes one file per collection with the local definition shape:
+
+- Calls `GET /groups/{groupId}/clusters/{clusterName}/search/indexes`
+- Keeps only `name`, `type`, and `definition` (taken from `latestDefinition`)
 - Omits server-managed fields such as `indexID`, `status`, `queryable`,
   `statusDetail`, and `latestDefinitionVersion`
 - Supports both `search` and `vectorSearch` definitions
-- Writes one file per collection: `<database>.<collection>.json` with this shape:
-
-  ```json
-  {
-    "database": "sample_mflix",
-    "collection": "movies",
-    "indexes": [
-      {
-        "name": "default",
-        "type": "search",
-        "definition": {
-          "mappings": { "dynamic": true }
-        }
-      }
-    ]
-  }
-  ```
-
-- `definition` preserves user fields such as `mappings`, `analyzers`, `synonyms`,
-  `storedSource`, and `numPartitions`
-- Unsafe filename characters are replaced with `_`
-- Collections without Search indexes produce no file
-- The run ends with a per-collection Markdown table and total count:
+- Writes `<database>.<collection>.json`; collections without Search indexes produce
+  no file
+- Exported files can be edited and synced back with the default mode
+- The run ends with an export summary table:
 
   ```text
-  Search export summary (2 collection(s) from /path/to/exported-search):
+  Search export summary (1 collection(s) from /path/to/exported-search):
 
   | Collection          | Exported |
   | ------------------- | -------: |
   | sample_mflix.movies |        1 |
-  | sample_mflix.users  |        2 |
-  | **Total**           |    **3** |
+  | **Total**           |    **1** |
   ```
 
-- The Atlas API key needs a role that can read Search indexes, such as Project Data
-  Access Read Only or Project Search Index Editor
-
-No `--db-username` / `--db-password` options are needed; the command never opens a
-MongoDB connection.
+The Atlas API key needs permission to read and update Search indexes, for example
+Project Search Index Editor. No `--db-username` / `--db-password` options are needed;
+the command never opens a MongoDB connection.
 
 ### `trigger`
 

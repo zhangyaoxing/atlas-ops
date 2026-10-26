@@ -41,11 +41,31 @@ class FakeAtlasClient:
         self.deleted_user_paths: list[str] = []
         self.search_index_payload: list[dict[str, Any]] = []
         self.search_index_requests: list[tuple[str, str, dict[str, Any]]] = []
+        self.search_create_calls: list[dict[str, Any]] = []
+        self.search_update_calls: list[dict[str, Any]] = []
+        self.search_delete_calls: list[dict[str, Any]] = []
+        self.atlas_search = SimpleNamespace(
+            create_group_cluster_fts_index=self._create_search,
+            update_group_cluster_fts_index=self._update_search,
+            delete_group_cluster_fts_index=self._delete_search,
+        )
         self.projects = SimpleNamespace(get_group=self._get_group)
         self.clusters = SimpleNamespace(
             list_group_clusters=self._list_clusters,
             get_group_cluster=self._get_cluster,
         )
+
+    def _create_search(self, **kwargs: Any) -> Any:
+        self.search_create_calls.append(kwargs)
+        return kwargs["body"]
+
+    def _update_search(self, **kwargs: Any) -> Any:
+        self.search_update_calls.append(kwargs)
+        return kwargs["body"]
+
+    def _delete_search(self, **kwargs: Any) -> Any:
+        self.search_delete_calls.append(kwargs)
+        return {"ok": 1}
 
     def request(self, method: str, path: str, **kwargs: Any) -> Any:
         if method == "DELETE":
@@ -1340,7 +1360,13 @@ def test_search_exports_search_indexes(tmp_path: Path, monkeypatch: pytest.Monke
     assert "Exported 1 search index(es) from 1 collection(s)" in result.output
 
 
-def test_search_requires_export(tmp_path: Path) -> None:
+def test_search_sync_requires_definitions(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    called: list[bool] = []
+    monkeypatch.setattr(
+        "atlas_ops.cli.client_from_env",
+        lambda: called.append(True) or pytest.fail("Atlas client must not be created"),
+    )
+
     result = runner.invoke(
         app,
         [
@@ -1354,7 +1380,8 @@ def test_search_requires_export(tmp_path: Path) -> None:
     )
 
     assert result.exit_code == 1
-    assert "only --export/-e" in result.output
+    assert "No .json files found" in result.output
+    assert called == []
 
 
 def test_search_reports_missing_credentials(
@@ -1592,3 +1619,109 @@ def test_trigger_uses_environment_targets(tmp_path: Path, monkeypatch: pytest.Mo
     assert client.get_group_calls == [GROUP_A.id]
     assert app_client.app_calls == [(GROUP_A.id, None), (GROUP_A.id, "atlas")]
     assert "Exported 0 trigger(s) from 0 collection(s) across 0 app(s)" in result.output
+
+
+def test_search_syncs_definitions_and_deletes_extras(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "search.json").write_text(
+        json.dumps(
+            {
+                "database": "exampleDB",
+                "collection": "example",
+                "indexes": [
+                    {
+                        "name": "same",
+                        "type": "search",
+                        "definition": {"mappings": {"dynamic": True}},
+                    },
+                    {
+                        "name": "changed",
+                        "type": "search",
+                        "definition": {"mappings": {"dynamic": False}},
+                    },
+                    {
+                        "name": "new",
+                        "type": "vectorSearch",
+                        "definition": {"fields": [{"type": "vector"}]},
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    client = FakeAtlasClient([GROUP_A], {GROUP_A.id: [CLUSTER]}, _detail())
+    client.search_index_payload = [
+        {
+            "database": "exampleDB",
+            "collectionName": "example",
+            "name": "same",
+            "indexID": "id-same",
+            "type": "search",
+            "latestDefinition": {"mappings": {"dynamic": True}},
+        },
+        {
+            "database": "exampleDB",
+            "collectionName": "example",
+            "name": "changed",
+            "indexID": "id-changed",
+            "type": "search",
+            "latestDefinition": {"mappings": {"dynamic": True}},
+        },
+        {
+            "database": "exampleDB",
+            "collectionName": "example",
+            "name": "old",
+            "indexID": "id-old",
+            "type": "search",
+            "latestDefinition": {"mappings": {"dynamic": True}},
+        },
+    ]
+    _patch_client(monkeypatch, client)
+
+    result = runner.invoke(
+        app,
+        [
+            "search",
+            str(tmp_path),
+            "-g",
+            GROUP_A.id,
+            "-c",
+            "cluster0",
+        ],
+        input="y\n",
+    )
+
+    assert result.exit_code == 0, result.output
+    assert [call["body"].name for call in client.search_create_calls] == ["new"]
+    created = client.search_create_calls[0]["body"].model_dump(by_alias=True, exclude_none=True)
+    assert created == {
+        "database": "exampleDB",
+        "collectionName": "example",
+        "name": "new",
+        "type": "vectorSearch",
+        "fields": [{"type": "vector"}],
+    }
+    assert client.search_update_calls[0]["index_id"] == "id-changed"
+    assert client.search_update_calls[0]["body"].name == "changed"
+    assert client.search_delete_calls == [
+        {
+            "cluster_name": "cluster0",
+            "group_id": GROUP_A.id,
+            "index_id": "id-old",
+        }
+    ]
+    assert "Search sync summary (1 collection(s)" in result.output
+    assert re.search(
+        r"^\| exampleDB\.example \|\s+1 \|\s+1 \|\s+1 \|\s+1 \|$",
+        result.output,
+        re.MULTILINE,
+    )
+    assert re.search(
+        r"^\| \*\*Total\*\*\s+\|\s+\*\*1\*\* \|\s+\*\*1\*\* "
+        r"\|\s+\*\*1\*\* \|\s+\*\*1\*\* \|$",
+        result.output,
+        re.MULTILINE,
+    )
+    assert "Search sync complete: 1 created, 1 updated, 1 skipped, 1 deleted." in result.output
+    assert client.created_user_payload is None

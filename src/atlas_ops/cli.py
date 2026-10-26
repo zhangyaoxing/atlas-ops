@@ -68,7 +68,19 @@ from atlas_ops.index.plan import (
     plan_indexes,
 )
 from atlas_ops.log import configure_logging
+from atlas_ops.search.apply import SearchApplyResult, apply_search_plan
+from atlas_ops.search.definitions import (
+    SearchCollectionIndexes,
+    load_search_index_definitions,
+)
 from atlas_ops.search.export import SearchExportResult, export_search_indexes
+from atlas_ops.search.plan import (
+    SearchAction,
+    SearchExtra,
+    SearchPlan,
+    plan_search_indexes,
+)
+from atlas_ops.search.remote import fetch_search_indexes
 from atlas_ops.trigger.export import TriggerExportResult, export_triggers
 
 logger = logging.getLogger(__name__)
@@ -324,7 +336,10 @@ def search(
         dir_okay=True,
         readable=True,
         resolve_path=True,
-        help="Directory for exported search index JSON files.",
+        help=(
+            "Directory with search index definition JSON files, or the export "
+            "destination when --export is used."
+        ),
     ),
     project: str | None = typer.Option(
         None,
@@ -345,20 +360,28 @@ def search(
         False,
         "--export",
         "-e",
-        help="Export all Atlas Search indexes for the cluster to DIRECTORY.",
+        help="Export Atlas Search indexes to DIRECTORY instead of syncing definitions.",
     ),
 ) -> None:
-    """Export all Atlas Search index definitions for one cluster.
+    """Synchronize or export Atlas Search indexes for one cluster.
+
+    By default, local JSON definitions in DIRECTORY are compared with the
+    cluster: missing indexes are created, changed definitions are updated,
+    unchanged indexes are skipped, and undeclared remote indexes are offered
+    for deletion. With ``--export``, definitions are written instead.
 
     The cluster-wide Search index endpoint is used, so the command needs only
     Atlas API credentials and the project/cluster. No MongoDB connection or
     temporary database user is created.
     """
+    definitions: list[SearchCollectionIndexes] | None = None
     target: ClusterTarget | None = None
-    result: SearchExportResult | None = None
+    export_result: SearchExportResult | None = None
+    sync_plan: SearchPlan | None = None
+    sync_result: SearchApplyResult | None = None
     try:
         if not export:
-            raise AtlasOperationError("The search command currently supports only --export/-e.")
+            definitions = load_search_index_definitions(directory)
         with client_from_env() as client:
             project_id, cluster_ref = _resolve_references(project, cluster)
             target_project = get_project(client, project_id)
@@ -367,18 +390,48 @@ def search(
                 raise AtlasOperationError(f"No cluster found for {cluster_ref!r}.")
             target = matches[0] if len(matches) == 1 else _choose_cluster(matches)
             _log_found_cluster(target, cluster_ref)
-            logger.info("Exporting search index definitions to %s...", directory)
-            result = export_search_indexes(
-                client,
-                project_id,
-                target.cluster_name,
-                directory,
-            )
-            logger.info(
-                "Exported %d search index(es) from %d collection(s).",
-                result.indexes,
-                result.files,
-            )
+
+            if export:
+                logger.info("Exporting search index definitions to %s...", directory)
+                export_result = export_search_indexes(
+                    client,
+                    project_id,
+                    target.cluster_name,
+                    directory,
+                )
+                logger.info(
+                    "Exported %d search index(es) from %d collection(s).",
+                    export_result.indexes,
+                    export_result.files,
+                )
+            else:
+                assert definitions is not None
+                remote = fetch_search_indexes(client, project_id, target.cluster_name)
+                sync_plan = plan_search_indexes(remote, definitions)
+                _log_search_plan(sync_plan)
+                delete_extras = False
+                if sync_plan.extras:
+                    _log_search_extras(sync_plan.extras)
+                    delete_extras = typer.confirm(
+                        f"Delete the {len(sync_plan.extras)} search index(es) "
+                        "that are not present in the definitions?",
+                        default=False,
+                    )
+                    if not delete_extras:
+                        logger.info("Skipping deletion of undefined search indexes.")
+                sync_result = apply_search_plan(
+                    client,
+                    project_id,
+                    target.cluster_name,
+                    sync_plan,
+                    delete_extras=delete_extras,
+                )
+                logger.info(
+                    "Search sync complete: %d created, %d updated, %d deleted.",
+                    sync_result.created,
+                    sync_result.updated,
+                    sync_result.deleted,
+                )
     except OpsError as exc:
         _fail(str(exc))
     except AtlasAdminApiError as exc:
@@ -389,8 +442,20 @@ def search(
         _fail(f"Could not reach the Atlas API: {exc}")
 
     assert target is not None
-    assert result is not None
-    _print_search_export_summary(directory, target, result)
+    if export:
+        assert export_result is not None
+        _print_search_export_summary(directory, target, export_result)
+    else:
+        assert definitions is not None
+        assert sync_plan is not None
+        assert sync_result is not None
+        _print_search_sync_summary(
+            directory,
+            target,
+            definitions,
+            sync_plan,
+            sync_result,
+        )
 
 
 @app.command()
@@ -853,6 +918,101 @@ def _format_markdown_table(
 
 def _markdown_cell(value: object) -> str:
     return str(value).replace("\\", "\\\\").replace("|", "\\|")
+
+
+def _log_search_plan(plan: SearchPlan) -> None:
+    for item in plan.items:
+        if item.action is SearchAction.CREATE:
+            logger.info(
+                'Will create search index "%s" on "%s.%s".',
+                escape(item.spec.name),
+                escape(item.database),
+                escape(item.collection),
+            )
+        elif item.action is SearchAction.UPDATE:
+            logger.info(
+                'Will update search index "%s" on "%s.%s".',
+                escape(item.spec.name),
+                escape(item.database),
+                escape(item.collection),
+            )
+        else:
+            logger.info(
+                'Search index "%s" on "%s.%s" is unchanged; skipping.',
+                escape(item.spec.name),
+                escape(item.database),
+                escape(item.collection),
+            )
+
+
+def _log_search_extras(extras: tuple[SearchExtra, ...]) -> None:
+    for extra in extras:
+        logger.warning(
+            'Search index "%s" on "%s.%s" is not present in the definitions.',
+            escape(extra.name),
+            escape(extra.database),
+            escape(extra.collection),
+        )
+
+
+def _print_search_sync_summary(
+    directory: Path,
+    target: ClusterTarget,
+    definitions: list[SearchCollectionIndexes],
+    plan: SearchPlan,
+    result: SearchApplyResult,
+) -> None:
+    counts: dict[tuple[str, str], list[int]] = {}
+    order: list[tuple[str, str]] = []
+    for definition in definitions:
+        key = (definition.database, definition.collection)
+        if key not in counts:
+            counts[key] = [0, 0, 0, 0]
+            order.append(key)
+
+    for item in plan.items:
+        key = (item.database, item.collection)
+        if item.action is SearchAction.CREATE:
+            counts[key][0] += 1
+        elif item.action is SearchAction.UPDATE:
+            counts[key][1] += 1
+        else:
+            counts[key][2] += 1
+    for extra in result.deleted_extras:
+        counts[(extra.database, extra.collection)][3] += 1
+
+    rows: list[tuple[str, int, int, int, int]] = []
+    for database, collection in order:
+        created, updated, unchanged, deleted = counts[(database, collection)]
+        rows.append((f"{database}.{collection}", created, updated, unchanged, deleted))
+    skipped = sum(row[3] for row in rows)
+    total = (
+        "**Total**",
+        f"**{result.created}**",
+        f"**{result.updated}**",
+        f"**{skipped}**",
+        f"**{result.deleted}**",
+    )
+
+    typer.echo("")
+    typer.echo(f"Cluster:    {target.cluster_name} ({target.cluster_id or 'unknown ID'})")
+    typer.echo(f"Project:    {target.project_name} ({target.project_id})")
+    typer.echo("")
+    typer.echo(f"Search sync summary ({len(rows)} collection(s) from {directory}):")
+    typer.echo("")
+    typer.echo(
+        _format_markdown_table(
+            ("Collection", "Created", "Updated", "Skipped", "Deleted"),
+            rows,
+            total,
+            numeric_columns={1, 2, 3, 4},
+        )
+    )
+    typer.echo("")
+    typer.echo(
+        f"Search sync complete: {result.created} created, {result.updated} updated, "
+        f"{skipped} skipped, {result.deleted} deleted."
+    )
 
 
 def _print_search_export_summary(
