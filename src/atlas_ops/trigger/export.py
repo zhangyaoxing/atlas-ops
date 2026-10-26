@@ -116,21 +116,22 @@ def export_triggers(
             ):
                 continue
 
+            associated_function = _associated_function(
+                client,
+                definition,
+                app_id,
+                project_id,
+                functions_by_name,
+                function_cache,
+            )
             entries.append(
                 {
                     "database": database,
                     "collection": collection,
                     "appId": app_id,
                     "appName": app_name,
-                    "trigger": definition,
-                    "function": _associated_function(
-                        client,
-                        definition,
-                        app_id,
-                        project_id,
-                        functions_by_name,
-                        function_cache,
-                    ),
+                    "trigger": _sanitized_trigger(definition),
+                    "function": _sanitized_function(associated_function),
                 }
             )
             apps_with_triggers.add(app_id)
@@ -170,8 +171,6 @@ def export_triggers(
             document = {
                 "database": database,
                 "collection": collection,
-                "appId": entry["appId"],
-                "appName": entry["appName"],
                 "trigger": entry["trigger"],
                 "function": entry["function"],
             }
@@ -251,6 +250,32 @@ def _matching_service_ids(
         if isinstance(service_id, str) and service_id:
             matching.add(service_id)
     return matching
+
+
+def _sanitized_trigger(trigger: dict[str, Any]) -> dict[str, Any]:
+    """Remove references that differ between App Services environments."""
+    raw = dict(trigger)
+    raw.pop("function_id", None)
+    raw.pop("function_name", None)
+    raw.pop("event_processors", None)
+    config = raw.get("config")
+    if isinstance(config, dict):
+        sanitized = dict(config)
+        sanitized.pop("service_id", None)
+        sanitized.pop("clusterName", None)
+        sanitized.pop("cluster_name", None)
+        raw["config"] = sanitized
+    return raw
+
+
+def _sanitized_function(function: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Remove identifiers that are specific to the source environment."""
+    if function is None:
+        return None
+    raw = dict(function)
+    raw.pop("name", None)
+    raw.pop("run_as_user_id", None)
+    return raw
 
 
 def _associated_function(

@@ -1558,20 +1558,15 @@ def test_trigger_exports_definitions(tmp_path: Path, monkeypatch: pytest.MonkeyP
     assert payload == {
         "database": "db",
         "collection": "coll",
-        "appId": "app-1",
-        "appName": "my-app",
         "trigger": {
             "name": "on-insert",
             "type": "DATABASE",
-            "function_id": "fn-1",
             "config": {
-                "service_id": "svc-1",
                 "database": "db",
                 "collection": "coll",
             },
         },
         "function": {
-            "name": "on-insert-function",
             "private": True,
             "source": "exports = function() { return 1; };",
         },

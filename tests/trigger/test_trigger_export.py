@@ -233,13 +233,17 @@ def test_export_filters_by_cluster_and_groups_by_collection(
     insert = json.loads((tmp_path / "db.coll.on-insert.json").read_text(encoding="utf-8"))
     assert insert["database"] == "db"
     assert insert["collection"] == "coll"
-    assert insert["appId"] == "app-1"
-    assert insert["appName"] == "my-app"
+    assert "appId" not in insert
+    assert "appName" not in insert
     assert insert["trigger"]["name"] == "on-insert"
     assert insert["trigger"]["type"] == "DATABASE"
     assert "_id" not in insert["trigger"]
+    assert "function_id" not in insert["trigger"]
+    assert "function_name" not in insert["trigger"]
+    assert "event_processors" not in insert["trigger"]
+    assert "service_id" not in insert["trigger"]["config"]
+    assert "clusterName" not in insert["trigger"]["config"]
     assert insert["function"] == {
-        "name": "fn-two",
         "private": False,
         "source": "exports = function() { return 2; };",
     }
@@ -248,7 +252,6 @@ def test_export_filters_by_cluster_and_groups_by_collection(
     assert update["trigger"]["name"] == "on-update"
     assert update["trigger"]["disabled"] is True
     assert update["function"] == {
-        "name": "fn-one",
         "private": True,
         "source": "exports = function() { return 1; };",
     }

@@ -436,9 +436,12 @@ Behavior:
   `event_processors.FUNCTION`, then fetches the full function definition
 - Writes one file per trigger: `<database>.<collection>.<trigger>.json`
 - Adds a `function` subdocument next to `trigger`
-- Removes server-managed `_id` and `last_modified` values from both trigger and
-  function definitions; other definition fields are preserved
-- Includes `appId` and `appName` for context; the trigger `name` is the stable key
+- Removes server-managed `_id` and `last_modified` values
+- Also removes environment-specific values so the files can be synced to another
+  project: `appId`, `appName`, trigger `function_id` / `function_name`,
+  `event_processors`, `config.service_id`, `config.clusterName`, and function
+  `name` / `run_as_user_id`
+- The trigger `name` is the stable key used by a future name-keyed sync
 - If two apps expose the same trigger name for the same namespace, the app name is
   appended to the filename to avoid overwriting
 - Collections without matching triggers produce no file
@@ -461,22 +464,17 @@ Trigger file format (`exampleDB.example.on-insert.json`):
 {
   "database": "exampleDB",
   "collection": "example",
-  "appId": "65f1a2b3c4d5e6f7a8b9c0d1",
-  "appName": "my-app",
   "trigger": {
     "name": "on-insert",
     "type": "DATABASE",
     "disabled": false,
     "config": {
-      "service_id": "...",
       "database": "exampleDB",
       "collection": "example",
       "operation_types": ["INSERT"]
-    },
-    "function_id": "..."
+    }
   },
   "function": {
-    "name": "on-insert-function",
     "private": true,
     "source": "exports = function(changeEvent) { ... };"
   }
@@ -484,9 +482,9 @@ Trigger file format (`exampleDB.example.on-insert.json`):
 ```
 
 `function` is `null` if the trigger has no resolvable function. The function source
-code is included so the trigger can be recreated together with its function. The
-`appId`, `function_id`, and `config.service_id` values are environment-specific; a
-future name-keyed sync can ignore them and match triggers by `trigger.name`.
+code is included so the trigger can be recreated together with its function. A
+future sync can match triggers by `trigger.name`, resolve the target trigger's own
+function reference, and update that function with the exported definition.
 
 The final summary line also reports file, collection, and app counts:
 
