@@ -14,10 +14,31 @@ Detailed documentation lives in the [project wiki](https://github.com/zhangyaoxi
 
 ## Install
 
+With `uv` for development:
+
 ```bash
 uv sync
 uv run atlas-ops --help
 ```
+
+Or install as a normal Python package with `pip`:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install .
+atlas-ops --help
+```
+
+Install from Git, or in an isolated environment with `pipx` / `uv tool`:
+
+```bash
+pip install "git+https://github.com/zhangyaoxing/atlas-ops.git"
+pipx install .
+uv tool install .
+```
+
+`pip install atlas-ops` will work after the package is published to PyPI.
 
 ## Configuration
 
