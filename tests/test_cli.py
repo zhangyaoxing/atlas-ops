@@ -1123,9 +1123,9 @@ def test_index_reports_missing_credentials(tmp_path: Path, monkeypatch: pytest.M
     result = runner.invoke(app, ["index", str(tmp_path)])
 
     assert result.exit_code == 1
-    assert "ATLAS_CLIENT_ID" in result.output
-    assert "ATLAS_CLIENT_SECRET" in result.output
-    assert "ATLAS_ACCESS_TOKEN" in result.output
+    assert "Choose an authentication method" in result.output
+    assert "Service Account (OAuth2)" in result.output
+    assert "API Key" in result.output
     assert "Project ID (24 hexadecimal characters)" not in result.output
 
 
@@ -1450,9 +1450,9 @@ def test_search_reports_missing_credentials(
     result = runner.invoke(app, ["search", str(tmp_path), "--export"])
 
     assert result.exit_code == 1
-    assert "ATLAS_CLIENT_ID" in result.output
-    assert "ATLAS_CLIENT_SECRET" in result.output
-    assert "ATLAS_ACCESS_TOKEN" in result.output
+    assert "Choose an authentication method" in result.output
+    assert "Service Account (OAuth2)" in result.output
+    assert "API Key" in result.output
     assert "Project ID (24 hexadecimal characters)" not in result.output
 
 
@@ -1696,9 +1696,9 @@ def test_trigger_reports_missing_credentials(
     result = runner.invoke(app, ["trigger", str(tmp_path), "--export"])
 
     assert result.exit_code == 1
-    assert "ATLAS_CLIENT_ID" in result.output
-    assert "ATLAS_CLIENT_SECRET" in result.output
-    assert "ATLAS_ACCESS_TOKEN" in result.output
+    assert "Choose an authentication method" in result.output
+    assert "Service Account (OAuth2)" in result.output
+    assert "API Key" in result.output
     assert "Project ID (24 hexadecimal characters)" not in result.output
 
 

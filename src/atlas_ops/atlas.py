@@ -15,6 +15,7 @@ from typing import Any, Protocol
 from urllib.parse import quote
 
 import httpx
+import typer
 from pyatlassdk import AtlasAdminApiError, AtlasAdminClient, AtlasAppAdminClient
 from pyatlassdk.admin.client import DEFAULT_OAUTH_TOKEN_URL
 from pyatlassdk.admin.models.cloud_database_user import CloudDatabaseUser
@@ -224,8 +225,57 @@ def _service_account_access_token(client_id: str, client_secret: str) -> str:
     return token
 
 
+def _has_any_auth(environ: Mapping[str, str]) -> bool:
+    return any(
+        environ.get(name, "").strip()
+        for name in (
+            PUBLIC_KEY_ENV,
+            PRIVATE_KEY_ENV,
+            CLIENT_ID_ENV,
+            CLIENT_SECRET_ENV,
+            ACCESS_TOKEN_ENV,
+        )
+    )
+
+
+def _prompt_value(label: str, *, secret: bool = False) -> str:
+    while True:
+        try:
+            value = typer.prompt(label, hide_input=secret).strip()
+        except typer.Abort as exc:
+            raise ConfigurationError("Authentication cancelled.") from exc
+        if value:
+            return value
+        typer.echo("Value cannot be empty.", err=True)
+
+
+def _prompt_auth_credentials() -> None:
+    """Ask for the auth method and its credentials, then put them in os.environ."""
+    typer.echo("No Atlas credentials found. Choose an authentication method:")
+    typer.echo("  1. Service Account (OAuth2)")
+    typer.echo("  2. API Key")
+    while True:
+        try:
+            choice = typer.prompt("Authentication method (1-2)", type=int)
+        except typer.Abort as exc:
+            raise ConfigurationError("Authentication cancelled.") from exc
+        if choice in {1, 2}:
+            break
+        typer.echo("Enter 1 or 2.", err=True)
+
+    if choice == 1:
+        os.environ[CLIENT_ID_ENV] = _prompt_value("Atlas Client ID")
+        os.environ[CLIENT_SECRET_ENV] = _prompt_value("Atlas Client Secret", secret=True)
+        return
+
+    os.environ[PUBLIC_KEY_ENV] = _prompt_value("Atlas Public Key")
+    os.environ[PRIVATE_KEY_ENV] = _prompt_value("Atlas Private Key", secret=True)
+
+
 def client_from_env(environ: Mapping[str, str] | None = None) -> AtlasAdminClient:
     """Build an Atlas Administration client from API keys or OAuth credentials."""
+    if environ is None and not _has_any_auth(os.environ):
+        _prompt_auth_credentials()
     api_credentials = _api_credentials(environ)
     if api_credentials is not None:
         public_key, private_key = api_credentials
@@ -254,6 +304,8 @@ def app_services_client_from_env(
     environ: Mapping[str, str] | None = None,
 ) -> AtlasAppAdminClient:
     """Log in to the App Services Admin API with API keys or OAuth."""
+    if environ is None and not _has_any_auth(os.environ):
+        _prompt_auth_credentials()
     api_credentials = _api_credentials(environ)
     if api_credentials is not None:
         public_key, private_key = api_credentials

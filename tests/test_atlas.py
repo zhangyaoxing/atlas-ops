@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Any
@@ -495,3 +496,54 @@ def test_client_from_env_logs_authentication_mode(
     client.close()
 
     assert message in caplog.text
+
+
+def _clear_auth_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in (
+        "ATLAS_PUBLIC_KEY",
+        "ATLAS_PRIVATE_KEY",
+        "ATLAS_CLIENT_ID",
+        "ATLAS_CLIENT_SECRET",
+        "ATLAS_ACCESS_TOKEN",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+
+def test_client_from_env_prompts_for_service_account(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clear_auth_environment(monkeypatch)
+    values = iter([1, "client-id", "client-secret"])
+    monkeypatch.setattr("atlas_ops.atlas.typer.prompt", lambda *args, **kwargs: next(values))
+
+    try:
+        client = client_from_env()
+        try:
+            assert client.auth_mode == "oauth2"
+        finally:
+            client.close()
+        assert os.environ["ATLAS_CLIENT_ID"] == "client-id"
+        assert os.environ["ATLAS_CLIENT_SECRET"] == "client-secret"
+    finally:
+        os.environ.pop("ATLAS_CLIENT_ID", None)
+        os.environ.pop("ATLAS_CLIENT_SECRET", None)
+
+
+def test_client_from_env_prompts_for_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clear_auth_environment(monkeypatch)
+    values = iter([2, "public-key", "private-key"])
+    monkeypatch.setattr("atlas_ops.atlas.typer.prompt", lambda *args, **kwargs: next(values))
+
+    try:
+        client = client_from_env()
+        try:
+            assert client.auth_mode == "digest"
+        finally:
+            client.close()
+        assert os.environ["ATLAS_PUBLIC_KEY"] == "public-key"
+        assert os.environ["ATLAS_PRIVATE_KEY"] == "private-key"
+    finally:
+        os.environ.pop("ATLAS_PUBLIC_KEY", None)
+        os.environ.pop("ATLAS_PRIVATE_KEY", None)
