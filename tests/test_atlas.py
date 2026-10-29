@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 import os
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from urllib.parse import quote
@@ -34,11 +33,6 @@ CLUSTER_A = SimpleNamespace(id="b" * 24, name="cluster0")
 CLUSTER_B = SimpleNamespace(id="d" * 24, name="Cluster0")
 
 PROJECT_A = ProjectTarget(project_id=GROUP_A.id, project_name=GROUP_A.name)
-
-
-@pytest.fixture(autouse=True)
-def _isolated_token_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("ATLAS_TOKEN_CACHE", str(tmp_path / "oauth-token.json"))
 
 
 def _page(results: list[Any], total: int | None = None) -> SimpleNamespace:
@@ -553,36 +547,6 @@ def test_client_from_env_prompts_for_api_key(
     finally:
         os.environ.pop("ATLAS_PUBLIC_KEY", None)
         os.environ.pop("ATLAS_PRIVATE_KEY", None)
-
-
-def test_access_token_is_cached_and_reused(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
-    _clear_auth_environment(monkeypatch)
-    monkeypatch.setenv("ATLAS_ACCESS_TOKEN", "access-token")
-    client = client_from_env()
-    client.close()
-
-    monkeypatch.delenv("ATLAS_ACCESS_TOKEN")
-    with caplog.at_level(logging.INFO, logger="atlas_ops.atlas"):
-        client = client_from_env()
-    client.close()
-
-    assert "Authentication: cached OAuth access token" in caplog.text
-
-
-def test_expired_cached_token_is_removed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _clear_auth_environment(monkeypatch)
-    cache = tmp_path / "oauth-token.json"
-    cache.write_text(
-        '{"access_token":"expired","expires_at":0}',
-        encoding="utf-8",
-    )
-
-    from atlas_ops.atlas import _load_cached_token
-
-    assert _load_cached_token() is None
-    assert not cache.exists()
 
 
 def test_client_from_env_prompts_for_access_token(

@@ -58,9 +58,9 @@ If no credentials are configured, the CLI asks which authentication method to us
 (Service Account OAuth2, API Key, or OAuth access token), then prompts for that
 method's credentials.
 
-OAuth access tokens are cached at `~/.cache/atlas-ops/oauth-token.json` (mode `0600`)
-until they expire. Override the path with `ATLAS_TOKEN_CACHE`. Service Account
-credentials are the recommended option because the SDK refreshes tokens automatically.
+OAuth access tokens entered interactively are kept in memory for the current process
+only and are not saved to disk. Service Account credentials are the recommended option
+because the SDK refreshes tokens automatically.
 
 Optional environment variables. If they are set, you can skip command parameters:
 

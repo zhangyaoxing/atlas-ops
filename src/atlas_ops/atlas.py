@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import base64
-import contextlib
-import json
 import logging
 import os
 import re
@@ -14,7 +11,6 @@ import time
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Any, Protocol
 from urllib.parse import quote
 
@@ -41,7 +37,6 @@ DB_PASSWORD_ENV = "ATLAS_DB_PASSWORD"
 CLIENT_ID_ENV = "ATLAS_CLIENT_ID"
 CLIENT_SECRET_ENV = "ATLAS_CLIENT_SECRET"
 ACCESS_TOKEN_ENV = "ATLAS_ACCESS_TOKEN"
-TOKEN_CACHE_ENV = "ATLAS_TOKEN_CACHE"
 
 TEMPORARY_USER_TTL_HOURS = 6
 _TEMPORARY_USER_PREFIX = "atlas_ops_"
@@ -230,72 +225,6 @@ def _service_account_access_token(client_id: str, client_secret: str) -> str:
     return token
 
 
-def _token_cache_path() -> Path:
-    override = os.environ.get(TOKEN_CACHE_ENV, "").strip()
-    if override:
-        return Path(override).expanduser()
-    cache_root = os.environ.get("XDG_CACHE_HOME", "").strip()
-    base = Path(cache_root).expanduser() if cache_root else Path.home() / ".cache"
-    return base / "atlas-ops" / "oauth-token.json"
-
-
-def _token_expiry(token: str) -> float:
-    """Read a JWT ``exp`` claim when present; otherwise assume one hour."""
-    parts = token.split(".")
-    if len(parts) == 3:
-        try:
-            payload = parts[1] + "=" * (-len(parts[1]) % 4)
-            data = json.loads(base64.urlsafe_b64decode(payload))
-            expires_at = float(data["exp"])
-            if expires_at > time.time():
-                return expires_at
-        except (ValueError, KeyError, TypeError, json.JSONDecodeError):
-            pass
-    return time.time() + 3600.0
-
-
-def _load_cached_token() -> str | None:
-    path = _token_cache_path()
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        token = data.get("access_token")
-        expires_at = float(data.get("expires_at", 0))
-    except (OSError, ValueError, TypeError, json.JSONDecodeError):
-        return None
-    if not isinstance(token, str) or not token or expires_at <= time.time() + 60:
-        with contextlib.suppress(OSError):
-            path.unlink()
-        return None
-    return token
-
-
-def _save_cached_token(token: str, expires_at: float) -> None:
-    path = _token_cache_path()
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = path.with_suffix(".tmp")
-        temporary.write_text(
-            json.dumps(
-                {"access_token": token, "expires_at": expires_at},
-                separators=(",", ":"),
-            )
-            + "\n",
-            encoding="utf-8",
-        )
-        temporary.chmod(0o600)
-        temporary.replace(path)
-    except OSError as exc:
-        logger.warning("Could not cache the OAuth access token: %s", exc)
-
-
-def _cached_client(token: str) -> AtlasAdminClient:
-    client = AtlasAdminClient()
-    client._oauth_token = token
-    remaining = max(_token_expiry(token) - time.time(), 60.0)
-    client._oauth_expires_at = time.monotonic() + remaining
-    return client
-
-
 def _has_any_auth(environ: Mapping[str, str]) -> bool:
     return any(
         environ.get(name, "").strip()
@@ -347,16 +276,11 @@ def _prompt_auth_credentials() -> None:
 
     token = _prompt_value("Atlas Access Token", secret=True)
     os.environ[ACCESS_TOKEN_ENV] = token
-    _save_cached_token(token, _token_expiry(token))
 
 
 def client_from_env(environ: Mapping[str, str] | None = None) -> AtlasAdminClient:
     """Build an Atlas Administration client from API keys or OAuth credentials."""
     if environ is None and not _has_any_auth(os.environ):
-        cached = _load_cached_token()
-        if cached is not None:
-            logger.info("Authentication: cached OAuth access token")
-            return _cached_client(cached)
         _prompt_auth_credentials()
     api_credentials = _api_credentials(environ)
     if api_credentials is not None:
@@ -373,9 +297,11 @@ def client_from_env(environ: Mapping[str, str] | None = None) -> AtlasAdminClien
     token = _access_token(environ)
     if token is not None:
         logger.info("Authentication: OAuth access token")
-        if environ is None:
-            _save_cached_token(token, _token_expiry(token))
-        return _cached_client(token)
+        client = AtlasAdminClient()
+        # The SDK does not expose an access-token constructor; seed its in-memory auth state.
+        client._oauth_token = token
+        client._oauth_expires_at = time.monotonic() + 3600.0
+        return client
 
     raise _missing_auth_error()
 
@@ -385,10 +311,6 @@ def app_services_client_from_env(
 ) -> AtlasAppAdminClient:
     """Log in to the App Services Admin API with API keys or OAuth."""
     if environ is None and not _has_any_auth(os.environ):
-        cached = _load_cached_token()
-        if cached is not None:
-            logger.info("Authentication: cached OAuth access token")
-            return AtlasAppAdminClient(access_token=cached)
         _prompt_auth_credentials()
     api_credentials = _api_credentials(environ)
     if api_credentials is not None:
@@ -407,8 +329,6 @@ def app_services_client_from_env(
 
     token = _access_token(environ)
     if token is not None:
-        if environ is None:
-            _save_cached_token(token, _token_expiry(token))
         return AtlasAppAdminClient(access_token=token)
 
     raise _missing_auth_error()
