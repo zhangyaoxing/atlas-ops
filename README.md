@@ -55,7 +55,12 @@ cp .env.example .env
 | Existing OAuth token | `ATLAS_ACCESS_TOKEN` |
 
 If no credentials are configured, the CLI asks which authentication method to use
-(Service Account OAuth2 or API Key), then prompts for that method's credentials.
+(Service Account OAuth2, API Key, or OAuth access token), then prompts for that
+method's credentials.
+
+OAuth access tokens are cached at `~/.cache/atlas-ops/oauth-token.json` (mode `0600`)
+until they expire. Override the path with `ATLAS_TOKEN_CACHE`. Service Account
+credentials are the recommended option because the SDK refreshes tokens automatically.
 
 Optional environment variables. If they are set, you can skip command parameters:
 
