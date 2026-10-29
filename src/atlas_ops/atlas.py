@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import secrets
@@ -22,6 +23,8 @@ from pyatlassdk.admin.models.user_scope import UserScope
 from pydantic import BaseModel
 
 from atlas_ops.errors import AtlasOperationError, ConfigurationError
+
+logger = logging.getLogger(__name__)
 
 PUBLIC_KEY_ENV = "ATLAS_PUBLIC_KEY"
 PRIVATE_KEY_ENV = "ATLAS_PRIVATE_KEY"
@@ -226,15 +229,18 @@ def client_from_env(environ: Mapping[str, str] | None = None) -> AtlasAdminClien
     api_credentials = _api_credentials(environ)
     if api_credentials is not None:
         public_key, private_key = api_credentials
+        logger.info("Authentication: Atlas API key")
         return AtlasAdminClient(public_key=public_key, private_key=private_key)
 
     service_account = _service_account_credentials(environ)
     if service_account is not None:
         client_id, client_secret = service_account
+        logger.info("Authentication: OAuth service account")
         return AtlasAdminClient(client_id=client_id, client_secret=client_secret)
 
     token = _access_token(environ)
     if token is not None:
+        logger.info("Authentication: OAuth access token")
         client = AtlasAdminClient()
         # The SDK does not expose an access-token constructor; seed its OAuth cache.
         client._oauth_token = token

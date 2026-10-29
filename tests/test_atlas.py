@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Any
@@ -465,3 +466,32 @@ def test_delete_temporary_user_propagates_other_errors() -> None:
 
     with pytest.raises(AtlasAdminApiError):
         delete_temporary_user(client, GROUP_A.id, "user")
+
+
+@pytest.mark.parametrize(
+    ("environ", "message"),
+    [
+        (
+            {"ATLAS_PUBLIC_KEY": "public", "ATLAS_PRIVATE_KEY": "private"},
+            "Authentication: Atlas API key",
+        ),
+        (
+            {"ATLAS_CLIENT_ID": "client-id", "ATLAS_CLIENT_SECRET": "client-secret"},
+            "Authentication: OAuth service account",
+        ),
+        (
+            {"ATLAS_ACCESS_TOKEN": "access-token"},
+            "Authentication: OAuth access token",
+        ),
+    ],
+)
+def test_client_from_env_logs_authentication_mode(
+    caplog: pytest.LogCaptureFixture,
+    environ: dict[str, str],
+    message: str,
+) -> None:
+    with caplog.at_level(logging.INFO, logger="atlas_ops.atlas"):
+        client = client_from_env(environ)
+    client.close()
+
+    assert message in caplog.text
