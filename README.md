@@ -42,13 +42,20 @@ uv tool install .
 
 ## Configuration
 
-Create `.env` from the template and set the Atlas API key pair:
+Create `.env` from the template and configure one authentication method:
 
 ```bash
 cp .env.example .env
-# ATLAS_PUBLIC_KEY=...
-# ATLAS_PRIVATE_KEY=...
 ```
+
+| Method | Variables |
+| --- | --- |
+| Atlas API key | `ATLAS_PUBLIC_KEY`, `ATLAS_PRIVATE_KEY` |
+| OAuth service account | `ATLAS_CLIENT_ID`, `ATLAS_CLIENT_SECRET` |
+| Existing OAuth token | `ATLAS_ACCESS_TOKEN` |
+
+If no credentials are configured, the CLI shows OAuth setup guidance instead of
+asking for API keys.
 
 Optional environment variables. If they are set, you can skip command parameters:
 

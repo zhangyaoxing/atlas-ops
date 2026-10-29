@@ -14,6 +14,7 @@ from atlas_ops.atlas import (
     ClusterTarget,
     ConnectionOption,
     ProjectTarget,
+    app_services_client_from_env,
     client_from_env,
     connection_options,
     create_temporary_user,
@@ -82,17 +83,74 @@ def test_client_from_env_uses_api_keys() -> None:
         client.close()
 
 
+def test_client_from_env_uses_service_account_oauth() -> None:
+    client = client_from_env(
+        {"ATLAS_CLIENT_ID": "client-id", "ATLAS_CLIENT_SECRET": "client-secret"}
+    )
+    try:
+        assert client.auth_mode == "oauth2"
+    finally:
+        client.close()
+
+
+def test_client_from_env_uses_access_token() -> None:
+    client = client_from_env({"ATLAS_ACCESS_TOKEN": "access-token"})
+    try:
+        assert client._oauth_token == "access-token"
+    finally:
+        client.close()
+
+
 @pytest.mark.parametrize(
     ("environ", "missing"),
     [
-        ({}, "ATLAS_PUBLIC_KEY, ATLAS_PRIVATE_KEY"),
         ({"ATLAS_PUBLIC_KEY": "only-public"}, "ATLAS_PRIVATE_KEY"),
-        ({"ATLAS_PRIVATE_KEY": "   "}, "ATLAS_PUBLIC_KEY"),
+        ({"ATLAS_PRIVATE_KEY": "only-private"}, "ATLAS_PUBLIC_KEY"),
+        ({"ATLAS_CLIENT_ID": "only-id"}, "ATLAS_CLIENT_SECRET"),
+        ({"ATLAS_CLIENT_SECRET": "only-secret"}, "ATLAS_CLIENT_ID"),
     ],
 )
-def test_client_from_env_reports_missing_credentials(environ: dict[str, str], missing: str) -> None:
-    with pytest.raises(ConfigurationError, match=missing.replace(", ", ".*")):
+def test_client_from_env_reports_partial_credentials(environ: dict[str, str], missing: str) -> None:
+    with pytest.raises(ConfigurationError, match=missing):
         client_from_env(environ)
+
+
+def test_client_from_env_guides_oauth_when_no_credentials() -> None:
+    with pytest.raises(ConfigurationError) as exc:
+        client_from_env({})
+
+    assert "ATLAS_CLIENT_ID" in str(exc.value)
+    assert "ATLAS_CLIENT_SECRET" in str(exc.value)
+    assert "ATLAS_ACCESS_TOKEN" in str(exc.value)
+
+
+def test_app_services_client_uses_service_account_oauth(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Response:
+        status_code = 200
+        text = "ok"
+
+        def json(self) -> dict[str, str]:
+            return {"access_token": "oauth-token"}
+
+    monkeypatch.setattr("atlas_ops.atlas.httpx.post", lambda *args, **kwargs: Response())
+
+    client = app_services_client_from_env(
+        {"ATLAS_CLIENT_ID": "client-id", "ATLAS_CLIENT_SECRET": "client-secret"}
+    )
+    try:
+        assert client.auth_mode == "bearer"
+    finally:
+        client.close()
+
+
+def test_app_services_client_uses_access_token() -> None:
+    client = app_services_client_from_env({"ATLAS_ACCESS_TOKEN": "access-token"})
+    try:
+        assert client.auth_mode == "bearer"
+    finally:
+        client.close()
 
 
 def test_get_project_returns_name() -> None:

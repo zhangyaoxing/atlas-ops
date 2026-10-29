@@ -1115,13 +1115,17 @@ def test_index_reports_missing_credentials(tmp_path: Path, monkeypatch: pytest.M
     _write_definitions(tmp_path)
     monkeypatch.delenv("ATLAS_PUBLIC_KEY", raising=False)
     monkeypatch.delenv("ATLAS_PRIVATE_KEY", raising=False)
+    monkeypatch.delenv("ATLAS_ACCESS_TOKEN", raising=False)
+    monkeypatch.delenv("ATLAS_CLIENT_SECRET", raising=False)
+    monkeypatch.delenv("ATLAS_CLIENT_ID", raising=False)
     _clear_target_env(monkeypatch)
 
     result = runner.invoke(app, ["index", str(tmp_path)])
 
     assert result.exit_code == 1
-    assert "ATLAS_PUBLIC_KEY" in result.output
-    assert "ATLAS_PRIVATE_KEY" in result.output
+    assert "ATLAS_CLIENT_ID" in result.output
+    assert "ATLAS_CLIENT_SECRET" in result.output
+    assert "ATLAS_ACCESS_TOKEN" in result.output
     assert "Project ID (24 hexadecimal characters)" not in result.output
 
 
@@ -1438,13 +1442,17 @@ def test_search_reports_missing_credentials(
 ) -> None:
     monkeypatch.delenv("ATLAS_PUBLIC_KEY", raising=False)
     monkeypatch.delenv("ATLAS_PRIVATE_KEY", raising=False)
+    monkeypatch.delenv("ATLAS_ACCESS_TOKEN", raising=False)
+    monkeypatch.delenv("ATLAS_CLIENT_SECRET", raising=False)
+    monkeypatch.delenv("ATLAS_CLIENT_ID", raising=False)
     _clear_target_env(monkeypatch)
 
     result = runner.invoke(app, ["search", str(tmp_path), "--export"])
 
     assert result.exit_code == 1
-    assert "ATLAS_PUBLIC_KEY" in result.output
-    assert "ATLAS_PRIVATE_KEY" in result.output
+    assert "ATLAS_CLIENT_ID" in result.output
+    assert "ATLAS_CLIENT_SECRET" in result.output
+    assert "ATLAS_ACCESS_TOKEN" in result.output
     assert "Project ID (24 hexadecimal characters)" not in result.output
 
 
@@ -1680,13 +1688,17 @@ def test_trigger_reports_missing_credentials(
 ) -> None:
     monkeypatch.delenv("ATLAS_PUBLIC_KEY", raising=False)
     monkeypatch.delenv("ATLAS_PRIVATE_KEY", raising=False)
+    monkeypatch.delenv("ATLAS_ACCESS_TOKEN", raising=False)
+    monkeypatch.delenv("ATLAS_CLIENT_SECRET", raising=False)
+    monkeypatch.delenv("ATLAS_CLIENT_ID", raising=False)
     _clear_target_env(monkeypatch)
 
     result = runner.invoke(app, ["trigger", str(tmp_path), "--export"])
 
     assert result.exit_code == 1
-    assert "ATLAS_PUBLIC_KEY" in result.output
-    assert "ATLAS_PRIVATE_KEY" in result.output
+    assert "ATLAS_CLIENT_ID" in result.output
+    assert "ATLAS_CLIENT_SECRET" in result.output
+    assert "ATLAS_ACCESS_TOKEN" in result.output
     assert "Project ID (24 hexadecimal characters)" not in result.output
 
 
